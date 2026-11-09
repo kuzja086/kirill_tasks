@@ -70,6 +70,30 @@ python -c "import json, handler; print(json.dumps(handler.handler({'session': {'
 
 ## Деплой
 
+### Установка и авторизация `yc`
+
+```powershell
+# Официальный установщик: кладёт yc.exe в %USERPROFILE%\yandex-cloud\bin и добавляет каталог в PATH.
+# После установки откройте новый терминал, чтобы обновился PATH.
+iex (New-Object System.Net.WebClient).DownloadString("https://storage.yandexcloud.net/yandexcloud-yc/install.ps1")
+
+# Авторизация: мастер откроет браузер и попросит OAuth-токен.
+yc init
+```
+
+Вариант без мастера — по готовому OAuth-токену
+(как получить: https://yandex.cloud/ru/docs/cli/operations/authentication/user):
+
+```powershell
+yc config profile create default
+yc config set token <OAUTH-токен>
+yc config set cloud-id <cloud-id>
+yc config set folder-id <folder-id>
+yc config list
+```
+
+### Создание функции и версии
+
 ```powershell
 # 1. Создать функцию (один раз)
 yc serverless function create --name alice-skill
