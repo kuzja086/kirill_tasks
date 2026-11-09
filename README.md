@@ -50,8 +50,36 @@ psql -h <хост> -p 5432 -U alice_skill -d alice_skill -f sql/001_init.sql
 ```powershell
 $env:PG_HOST='...'; $env:PG_DATABASE='alice_skill'
 $env:PG_USER='...'; $env:PG_PASSWORD='...'; $env:PG_SSLMODE='require'
-python -c "import json, handler; print(json.dumps(handler.handler({'session': {'new': True, 'user': {'user_id': 'test'}}, 'request': {'command': ''}, 'version': '1.0'}, None), ensure_ascii=False, indent=2))"
+python -c "import json, handler; r = handler.handler({'session': {'new': True, 'user': {'user_id': 'test'}}, 'request': {'command': ''}, 'version': '1.0'}, None); print(json.dumps(json.loads(r['body']), ensure_ascii=False, indent=2))"
 ```
+
+Проверить развёрнутую функцию по HTTPS:
+
+```powershell
+$body = '{"version":"1.0","session":{"new":true,"user":{"user_id":"smoke"}},"request":{"command":""}}'
+Invoke-RestMethod -Uri 'https://functions.yandexcloud.net/<id-функции>' -Method Post `
+    -ContentType 'application/json; charset=utf-8' `
+    -Body ([Text.Encoding]::UTF8.GetBytes($body))
+```
+
+`curl.exe -d '{"...":"..."}'` в PowerShell искажает двойные кавычки и функция
+получает невалидный JSON — используйте `Invoke-RestMethod` или
+`curl.exe --data-binary '@файл.json'`.
+
+### Формат события и ответа
+
+При вызове по HTTPS рантайм передаёт HTTP-событие: JSON навыка лежит в
+`event['body']` строкой (возможно, в base64 при `isBase64Encoded`), а ответ
+функция обязана вернуть в формате интеграции — иначе платформа отдаст пустое
+тело:
+
+```json
+{"statusCode": 200, "headers": {"Content-Type": "application/json; charset=utf-8"}, "body": "<JSON протокола Алисы>", "isBase64Encoded": false}
+```
+
+`handler.py` делает это сам (`_extract_request_payload` / `_http_response`) и
+одинаково работает при прямом вызове через `yc serverless function invoke`,
+где событием служит сам JSON Диалогов.
 
 ## Переменные окружения
 
@@ -140,3 +168,7 @@ URL функции вида `https://functions.yandexcloud.net/<id>` указы�
 ответ протокола («Что-то пошло не так…»), а трейсбек попадает в логи функции
 (`yc serverless function logs <name>`). Соединение с Postgres переиспользуется
 между «тёплыми» вызовами и один раз переоткрывается при обрыве.
+
+Если логи недоступны, включите `DEBUG_ERRORS=1` в переменных окружения версии —
+тогда в тексте ответа будет тип и сообщение исключения. После диагностики флаг
+обязательно выключите: он раскрывает внутренние детали пользователю.

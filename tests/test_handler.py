@@ -2,30 +2,68 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from types import SimpleNamespace
+from typing import Any
 
 import handler as cloud_function
 from handler import ERROR_TEXT
 
 
-def test_handler_returns_protocol_payload(alice_event, repository, monkeypatch) -> None:
+def _payload(response: dict[str, Any]) -> dict[str, Any]:
+    """Тело ответа HTTP-интеграции в виде разобранного JSON."""
+    return json.loads(response["body"])
+
+
+def _http_event(alice_request: dict[str, Any], *, encode_body_as_base64: bool = False) -> dict[str, Any]:
+    raw_body = json.dumps(alice_request, ensure_ascii=False)
+    if encode_body_as_base64:
+        raw_body = base64.b64encode(raw_body.encode("utf-8")).decode("ascii")
+    return {
+        "httpMethod": "POST",
+        "headers": {"Content-Type": "application/json"},
+        "body": raw_body,
+        "isBase64Encoded": encode_body_as_base64,
+    }
+
+
+def test_handler_returns_http_integration_response(alice_event, repository, monkeypatch) -> None:
     monkeypatch.setattr(cloud_function, "_repository", repository)
-    event = alice_event("запомни меня аня", tokens=["запомни", "меня", "аня"], intent="remember_name")
+    event = alice_event(
+        "запомни меня аня",
+        tokens=["запомни", "меня", "аня"],
+        intent="remember_name",
+    )
 
-    payload = cloud_function.handler(event, SimpleNamespace(request_id="req-1"))
+    response = cloud_function.handler(event, SimpleNamespace(request_id="req-1"))
 
+    assert response["statusCode"] == 200
+    assert response["isBase64Encoded"] is False
+    assert response["headers"]["Content-Type"].startswith("application/json")
+    payload = _payload(response)
     assert payload["version"] == "1.0"
     assert payload["response"]["end_session"] is False
     assert "Аня" in payload["response"]["text"]
     assert repository.saved == [("user-1", "Аня")]
 
 
-def test_handler_greets_on_new_session(alice_event, repository, monkeypatch) -> None:
+def test_handler_reads_request_from_http_body(alice_event, repository, monkeypatch) -> None:
     monkeypatch.setattr(cloud_function, "_repository", repository)
+    event = _http_event(alice_event("", is_new_session=True))
 
-    payload = cloud_function.handler(alice_event("", is_new_session=True), None)
+    response = cloud_function.handler(event, None)
 
-    assert payload["response"]["text"].startswith("Привет")
+    assert _payload(response)["response"]["text"].startswith("Привет")
+
+
+def test_handler_reads_base64_encoded_body(alice_event, repository, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_function, "_repository", repository)
+    event = _http_event(alice_event("как меня зовут", intent="ask_name"), encode_body_as_base64=True)
+
+    response = cloud_function.handler(event, None)
+
+    assert "не знакомы" in _payload(response)["response"]["text"]
 
 
 def test_handler_returns_valid_response_on_backend_error(alice_event, monkeypatch) -> None:
@@ -38,12 +76,22 @@ def test_handler_returns_valid_response_on_backend_error(alice_event, monkeypatc
 
     monkeypatch.setattr(cloud_function, "_repository", BrokenRepository())
 
-    payload = cloud_function.handler(alice_event("как меня зовут", intent="ask_name"), None)
+    response = cloud_function.handler(alice_event("как меня зовут", intent="ask_name"), None)
 
-    assert payload == {
+    assert response["statusCode"] == 200
+    assert _payload(response) == {
         "version": "1.0",
         "response": {"text": ERROR_TEXT, "end_session": False},
     }
+
+
+def test_handler_returns_error_text_on_invalid_json(repository, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_function, "_repository", repository)
+
+    response = cloud_function.handler(_http_event({"session": {}}) | {"body": "не json"}, None)
+
+    assert response["statusCode"] == 200
+    assert _payload(response)["response"]["text"] == ERROR_TEXT
 
 
 def test_handler_echoes_request_version(alice_event, repository, monkeypatch) -> None:
@@ -51,9 +99,21 @@ def test_handler_echoes_request_version(alice_event, repository, monkeypatch) ->
     event = alice_event("привет")
     event["version"] = "2.0"
 
-    payload = cloud_function.handler(event, None)
+    response = cloud_function.handler(event, None)
 
-    assert payload["version"] == "2.0"
+    assert _payload(response)["version"] == "2.0"
+
+
+def test_error_text_hides_details_by_default(monkeypatch) -> None:
+    monkeypatch.delenv(cloud_function.DEBUG_ENV_VAR, raising=False)
+
+    assert cloud_function._error_text(RuntimeError("boom")) == ERROR_TEXT
+
+
+def test_error_text_shows_details_when_debug_enabled(monkeypatch) -> None:
+    monkeypatch.setenv(cloud_function.DEBUG_ENV_VAR, "1")
+
+    assert cloud_function._error_text(RuntimeError("boom")) == "RuntimeError: boom"
 
 
 def test_repository_is_created_once(monkeypatch) -> None:
