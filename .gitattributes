@@ -1,0 +1,7 @@
+# Нормализуем переводы строк: код исполняется в Linux-контейнере Cloud Functions.
+* text=auto
+*.py text eol=lf
+*.sql text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.ps1 text eol=crlf

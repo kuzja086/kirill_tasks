@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Секреты и локальное окружение
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account-key*.json
+
+# Артефакты сборки и деплоя Yandex Cloud
+.build/
+build/
+dist/
+*.zip
+yc-*.json
+
+# IDE и ОС
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
