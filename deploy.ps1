@@ -24,6 +24,12 @@ param(
     [string]$BuildDirectory = '.build',
     [string]$Memory = '128m',
     [string]$ExecutionTimeout = '5s',
+
+    # Секреты Yandex Lockbox: значения попадут в переменные окружения версии.
+    [string]$SecretId,
+    [string]$ServiceAccountId,
+    [string[]]$SecretKeys = @(),
+
     [switch]$BuildOnly
 )
 
@@ -82,14 +88,46 @@ if (-not (Test-Path -LiteralPath $envPath)) {
 $environmentLines = Get-Content -LiteralPath $envPath |
     Where-Object { $_ -match '^\s*[^#\s][^=]*=' } |
     ForEach-Object { $_.Trim() }
-$environment = $environmentLines -join ','
+
+# Переменные, которые берутся из Lockbox, не передаём открытым текстом:
+# иначе одно и то же имя окажется и в --environment, и в --secret.
+$secretKeys = @($SecretKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+if ($secretKeys.Count -gt 0) {
+    if ([string]::IsNullOrEmpty($SecretId)) {
+        throw 'Для -SecretKeys нужен -SecretId (идентификатор секрета Lockbox).'
+    }
+    if ([string]::IsNullOrEmpty($ServiceAccountId)) {
+        throw 'Для секретов Lockbox нужен -ServiceAccountId с ролью lockbox.payloadViewer на секрете.'
+    }
+    $environmentLines = $environmentLines | Where-Object {
+        $name = ($_ -split '=', 2)[0].Trim()
+        $secretKeys -notcontains $name
+    }
+}
+$environment = ($environmentLines -join ',')
+
+$arguments = @(
+    'serverless', 'function', 'version', 'create'
+    '--function-id', $FunctionId
+    '--runtime', $Runtime
+    '--entrypoint', $Entrypoint
+    '--memory', $Memory
+    '--execution-timeout', $ExecutionTimeout
+    '--source-path', $archivePath
+)
+if (-not [string]::IsNullOrEmpty($environment)) {
+    $arguments += @('--environment', $environment)
+}
+if (-not [string]::IsNullOrEmpty($ServiceAccountId)) {
+    $arguments += @('--service-account-id', $ServiceAccountId)
+}
+foreach ($key in $secretKeys) {
+    $arguments += @('--secret', "id=$SecretId,key=$key,environment-variable=$key")
+}
 
 Write-Host "Создание версии функции $FunctionId ($Runtime, entrypoint $Entrypoint)"
-yc serverless function version create `
-    --function-id $FunctionId `
-    --runtime $Runtime `
-    --entrypoint $Entrypoint `
-    --memory $Memory `
-    --execution-timeout $ExecutionTimeout `
-    --source-path $archivePath `
-    --environment $environment
+if ($secretKeys.Count -gt 0) {
+    Write-Host "Секрет Lockbox ${SecretId} — ключи: $($secretKeys -join ', ')"
+}
+yc @arguments
+

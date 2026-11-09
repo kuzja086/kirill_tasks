@@ -89,7 +89,7 @@ Invoke-RestMethod -Uri 'https://functions.yandexcloud.net/<id-функции>' -
 | `PG_PORT` | нет | `5432` | Порт Postgres |
 | `PG_DATABASE` | да | — | Имя базы |
 | `PG_USER` | да | — | Пользователь базы |
-| `PG_PASSWORD` | да | — | Пароль пользователя |
+| `PG_PASSWORD` | да | — | Пароль пользователя; храните в Lockbox (см. ниже) |
 | `PG_SSLMODE` | нет | `prefer` | Режим TLS; для внешнего доступа используйте `require` |
 | `PG_CONNECT_TIMEOUT` | нет | `5` | Таймаут соединения, секунды (меньше таймаута функции) |
 
@@ -140,6 +140,55 @@ URL функции вида `https://functions.yandexcloud.net/<id>` указы�
 `deploy.ps1` сохранён в UTF-8 с BOM: Windows PowerShell 5.1 иначе читает кириллицу
 как ANSI и завершается ошибкой разбора (правило зафиксировано в `.editorconfig`).
 
+### Секреты Yandex Lockbox
+
+Пароль Postgres не должен лежать в `.env` и в открытых переменных версии.
+В Lockbox он хранится зашифрованным, а Cloud Functions подставляет его в
+переменную окружения при каждом вызове — код навыка при этом не меняется,
+он по-прежнему читает `os.environ`.
+
+```powershell
+# 1. Сервисный аккаунт функции: именно ему нужны права на секрет.
+yc iam service-account create --name alice-skill-sa
+
+# 2. Секрет. Payload передаём через stdin: PowerShell 5.1 вырезает двойные
+#    кавычки из аргументов, и JSON-строка в --payload ломается.
+'[{"key":"PG_PASSWORD","text_value":"<пароль>"}]' | yc lockbox secret create --name alice-skill-pg --payload -
+
+# 3. Разрешить сервисному аккаунту читать payload секрета.
+yc lockbox secret add-access-binding --id <secret-id> `
+    --role lockbox.payloadViewer --service-account-id <sa-id>
+
+# 4. Деплой: PG_PASSWORD берётся из секрета, остальные переменные — из .env.
+./deploy.ps1 -FunctionId <id-функции> `
+    -SecretId <secret-id> -ServiceAccountId <sa-id> -SecretKeys PG_PASSWORD
+```
+
+Что делает скрипт: исключает перечисленные ключи из `--environment` (чтобы не
+дублировать имя) и добавляет `--secret id=<secret-id>,key=PG_PASSWORD,environment-variable=PG_PASSWORD`.
+Проверить результат:
+
+```powershell
+yc serverless function version get --id <version-id>
+# environment: PG_HOST, PG_PORT, PG_DATABASE, PG_USER, PG_SSLMODE, PG_CONNECT_TIMEOUT
+# secrets:     key: PG_PASSWORD -> environment_variable: PG_PASSWORD
+```
+
+Ротация пароля — это новая версия секрета, передеплой функции не требуется:
+платформа подставляет текущую версию при каждом вызове.
+
+```powershell
+'[{"key":"PG_PASSWORD","text_value":"<новый пароль>"}]' | yc lockbox secret add-version --id <secret-id> --payload -
+```
+
+Ограничения текущей реализации `deploy.ps1`: поддерживается один секрет на
+версию, имена ключей в секрете совпадают с именами переменных окружения.
+Несколько секретов (например, отдельно пароль и логин) добавляются вызовом
+`--secret` с разными `id` — для этого скрипт нужно расширить.
+
+Важно: секрет, выданный через `--secret`, попадает в `os.environ` контейнера,
+поэтому `DEBUG_ERRORS` и логи по-прежнему не должны печатать значения переменных.
+
 
 ## Как добавить сценарий
 
@@ -158,8 +207,9 @@ URL функции вида `https://functions.yandexcloud.net/<id>` указы�
 - Postgres открыт в интернет: включайте TLS (`PG_SSLMODE=require`), не используйте
   суперпользователя в `PG_USER`, ограничьте `listen_addresses`/`pg_hba.conf`
   и по возможности доступ по IP.
-- Пароль хранится в переменных окружения версии функции; для продакшена
-  предпочтителен Yandex Lockbox вместо открытых переменных.
+- Пароль хранится в Yandex Lockbox и подставляется в переменные окружения версии
+  через `--secret` (см. «Секреты Yandex Lockbox»); сервисному аккаунту функции
+  выдавайте только роль `lockbox.payloadViewer` на конкретный секрет.
 - `.env`, ключи и архивы сборки в `.gitignore` — не коммитьте секреты.
 
 ## Ошибки и логи
