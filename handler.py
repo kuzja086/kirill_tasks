@@ -26,7 +26,8 @@ import logging
 import os
 from typing import Any
 
-from alice_skill.config import load_settings
+from alice_skill.config import ConfigError, load_settings
+from alice_skill.db import CONNECTION_ERRORS
 from alice_skill.dialogue import respond
 from alice_skill.models import AliceRequest, AliceResponse
 from alice_skill.repository import PostgresSkillRepository
@@ -35,10 +36,15 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 ERROR_TEXT = "Что-то пошло не так. Попробуйте ещё раз через минуту."
+DB_UNAVAILABLE_TEXT = (
+    "Не получилось заглянуть в дневник задач. Попросите взрослого проверить связь с базой."
+)
 
 # Переменная окружения для отладки: при DEBUG_ERRORS=1 в ответ попадает
 # тип и текст исключения. Включайте только на время диагностики.
 DEBUG_ENV_VAR = "DEBUG_ERRORS"
+
+DB_ERRORS = CONNECTION_ERRORS + (ConfigError,)
 
 _repository: PostgresSkillRepository | None = None
 
@@ -110,10 +116,14 @@ def _error_text(error: Exception) -> str:
     """Текст ответа при внутренней ошибке.
 
     При ``DEBUG_ERRORS=1`` возвращает тип и текст исключения — помогает
-    диагностировать проблему в облаке, когда логи недоступны.
+    диагностировать проблему в облаке, когда логи недоступны. Ошибки
+    подключения к Postgres отвечаем отдельной фразой: ребёнку бесполезно
+    слышать «попробуйте ещё раз», если база недоступна.
     """
     if os.getenv(DEBUG_ENV_VAR) == "1":
         return f"{type(error).__name__}: {error}"
+    if isinstance(error, DB_ERRORS):
+        return DB_UNAVAILABLE_TEXT
     return ERROR_TEXT
 
 

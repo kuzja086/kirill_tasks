@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import handler as cloud_function
+import psycopg2
+from alice_skill.config import ConfigError
 from handler import ERROR_TEXT
 
 
@@ -149,6 +151,33 @@ def test_error_text_hides_details_by_default(monkeypatch) -> None:
     monkeypatch.delenv(cloud_function.DEBUG_ENV_VAR, raising=False)
 
     assert cloud_function._error_text(RuntimeError("boom")) == ERROR_TEXT
+
+
+def test_error_text_for_database_errors(monkeypatch) -> None:
+    monkeypatch.delenv(cloud_function.DEBUG_ENV_VAR, raising=False)
+
+    assert (
+        cloud_function._error_text(psycopg2.OperationalError("refused"))
+        == cloud_function.DB_UNAVAILABLE_TEXT
+    )
+    assert (
+        cloud_function._error_text(ConfigError("не задан PG_HOST"))
+        == cloud_function.DB_UNAVAILABLE_TEXT
+    )
+
+
+def test_handler_reports_database_unavailable(alice_event, monkeypatch) -> None:
+    class OfflineRepository:
+        def ensure_daily_plan(self, user_id, plan_date):
+            raise psycopg2.OperationalError("connection refused")
+
+    monkeypatch.delenv(cloud_function.DEBUG_ENV_VAR, raising=False)
+    monkeypatch.setattr(cloud_function, "_repository", OfflineRepository())
+    event = _http_event(alice_event("сколько у меня баллов", intent="my_points"))
+
+    response = cloud_function.handler(event, None)
+
+    assert _payload(response)["response"]["text"] == cloud_function.DB_UNAVAILABLE_TEXT
 
 
 def test_error_text_shows_details_when_debug_enabled(monkeypatch) -> None:
