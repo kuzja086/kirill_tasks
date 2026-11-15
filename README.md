@@ -156,6 +156,14 @@ psql -h <хост> -p 5432 -U alice_skill -d alice_skill -f sql/001_init.sql
 psql -h <хост> -p 5432 -U alice_skill -d alice_skill -f sql/002_seed.sql
 ```
 
+Проверить доступность базы по параметрам из `.env` (пароль не печатается):
+
+```powershell
+python tools/db_check.py
+# Хост: postgres.example.pro:5432, база alice_skill, пользователь alice_skill, sslmode=require
+# OK: PostgreSQL 16.4 ...
+```
+
 Добавить задачу или награду можно обычным `INSERT` (см. `sql/002_seed.sql`);
 `is_active = false` убирает запись из плана и списка наград, не ломая историю.
 
@@ -235,8 +243,9 @@ https://functions.yandexcloud.net/<id-функции>?integration=raw
 | `PG_DATABASE` | да | — | Имя базы |
 | `PG_USER` | да | — | Пользователь базы |
 | `PG_PASSWORD` | да | — | Пароль пользователя; храните в Lockbox (см. ниже) |
-| `PG_SSLMODE` | нет | `prefer` | Режим TLS; для внешнего доступа используйте `require` |
+| `PG_SSLMODE` | нет | `prefer` | Режим TLS; для внешнего доступа используйте `require`. Псевдонимы `enable/on` = `require`, `off` = `disable` |
 | `PG_CONNECT_TIMEOUT` | нет | `5` | Таймаут соединения, секунды (меньше таймаута функции) |
+| `PG_HOSTADDR` | нет | — | Подключиться по этому IP, оставив `PG_HOST` для проверки сертификата (когда DNS отдаёт неверный адрес) |
 
 Значения задаются в переменных окружения версии функции; локально — в `.env`,
 который не коммитится.

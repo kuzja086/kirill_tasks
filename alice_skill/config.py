@@ -14,6 +14,23 @@ DEFAULT_CONNECT_TIMEOUT = 5
 
 REQUIRED_VARIABLES = ("PG_HOST", "PG_DATABASE", "PG_USER", "PG_PASSWORD")
 
+# Значения, которые принимает libpq.
+VALID_SSLMODES = ("disable", "allow", "prefer", "require", "verify-ca", "verify-full")
+
+# Человеческие псевдонимы: в .env часто пишут enable/on вместо require.
+SSLMODE_ALIASES = {
+    "enable": "require",
+    "enabled": "require",
+    "on": "require",
+    "true": "require",
+    "yes": "require",
+    "disable": "disable",
+    "disabled": "disable",
+    "off": "disable",
+    "false": "disable",
+    "no": "disable",
+}
+
 
 class ConfigError(RuntimeError):
     """Обязательные переменные окружения не заданы или заданы неверно."""
@@ -30,15 +47,18 @@ class Settings:
     pg_password: str
     pg_sslmode: str = DEFAULT_SSLMODE
     pg_connect_timeout: int = DEFAULT_CONNECT_TIMEOUT
+    pg_hostaddr: str | None = None
 
     @property
     def connection_params(self) -> dict[str, str | int]:
         """Параметры для ``psycopg2.connect(**params)``.
 
         Возвращаем kwargs, а не DSN-строку, чтобы не экранировать вручную
-        спецсимволы в пароле.
+        спецсимволы в пароле. ``hostaddr`` задаётся отдельно: он позволяет
+        подключиться по IP, когда DNS отдаёт неверный адрес, но при этом
+        имя из ``host`` остаётся для проверки сертификата.
         """
-        return {
+        params: dict[str, str | int] = {
             "host": self.pg_host,
             "port": self.pg_port,
             "dbname": self.pg_database,
@@ -47,6 +67,9 @@ class Settings:
             "sslmode": self.pg_sslmode,
             "connect_timeout": self.pg_connect_timeout,
         }
+        if self.pg_hostaddr:
+            params["hostaddr"] = self.pg_hostaddr
+        return params
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -67,12 +90,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         pg_database=source["PG_DATABASE"].strip(),
         pg_user=source["PG_USER"].strip(),
         pg_password=source["PG_PASSWORD"],
-        pg_sslmode=(source.get("PG_SSLMODE") or DEFAULT_SSLMODE).strip(),
+        pg_sslmode=_normalize_sslmode(source.get("PG_SSLMODE")),
         pg_connect_timeout=_as_int(
             source.get("PG_CONNECT_TIMEOUT"),
             DEFAULT_CONNECT_TIMEOUT,
             "PG_CONNECT_TIMEOUT",
         ),
+        pg_hostaddr=(source.get("PG_HOSTADDR") or "").strip() or None,
     )
 
 
@@ -85,3 +109,16 @@ def _as_int(raw: str | None, default: int, name: str) -> int:
         raise ConfigError(
             f"Переменная {name} должна быть целым числом, получено: {raw!r}"
         ) from error
+
+
+def _normalize_sslmode(raw: str | None) -> str:
+    """Приводит PG_SSLMODE к значению libpq, понимая enable/on/off и т.п."""
+    value = (raw or DEFAULT_SSLMODE).strip().lower()
+    value = SSLMODE_ALIASES.get(value, value)
+    if value not in VALID_SSLMODES:
+        raise ConfigError(
+            "Переменная PG_SSLMODE должна быть одной из: "
+            + ", ".join(VALID_SSLMODES)
+            + f"; получено: {raw!r}"
+        )
+    return value
