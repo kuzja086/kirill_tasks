@@ -96,7 +96,7 @@ class AliceRequest:
         return cls(
             command=str(request.get("command") or "").strip(),
             original_utterance=str(request.get("original_utterance") or ""),
-            intent=next(iter(intents), None),
+            intent=next(iter(intents), None) or _intent_from_payload(request),
             tokens=tuple(str(token) for token in nlu.get("tokens") or ()),
             payload=dict(request.get("payload") or {}),
             session_id=str(session.get("session_id") or ""),
@@ -111,6 +111,23 @@ class AliceRequest:
     def is_empty(self) -> bool:
         """Признак «пустого» запроса: пользователь открыл навык и молчит."""
         return not self.command and not self.original_utterance
+
+
+def _intent_from_payload(request: dict[str, Any]) -> str | None:
+    """Интент из payload кнопки.
+
+    Alice присылает ``request.type = ButtonPressed`` и payload, который навык
+    положил в кнопку (``{"intent": "list_tasks"}``), — NLU при этом может быть
+    пустым.
+    """
+    payload = request.get("payload")
+    if not isinstance(payload, dict):
+        return None
+
+    intent = payload.get("intent")
+    if isinstance(intent, str) and intent.strip():
+        return intent.strip()
+    return None
 
 
 @dataclass

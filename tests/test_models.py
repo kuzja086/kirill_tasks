@@ -47,6 +47,31 @@ def test_from_event_keeps_protocol_version(alice_event) -> None:
     assert AliceRequest.from_event(event).version == "2.0"
 
 
+def test_from_event_reads_intent_from_button_payload(alice_event) -> None:
+    event = alice_event("", payload={"intent": "list_tasks"})
+    event["request"]["type"] = "ButtonPressed"
+
+    request = AliceRequest.from_event(event)
+
+    assert request.intent == "list_tasks"
+
+
+def test_nlu_intent_has_priority_over_payload(alice_event) -> None:
+    event = alice_event(
+        "какие награды",
+        intent="list_rewards",
+        payload={"intent": "list_tasks"},
+    )
+
+    assert AliceRequest.from_event(event).intent == "list_rewards"
+
+
+def test_from_event_ignores_non_string_payload_intent(alice_event) -> None:
+    event = alice_event("привет", payload={"intent": 42})
+
+    assert AliceRequest.from_event(event).intent is None
+
+
 def test_response_serializes_optional_fields() -> None:
     response = AliceResponse(text="Привет", tts="Привет!", buttons=[make_button("Ещё")])
 

@@ -208,6 +208,51 @@ def test_today_in_skill_timezone_is_date() -> None:
 
 
 @pytest.mark.parametrize(
+    ("phrase", "expected_intent"),
+    [
+        ("какие задачи на сегодня", dialogue.INTENT_LIST_TASKS),
+        ("что мне делать", dialogue.INTENT_LIST_TASKS),
+        ("какие награды", dialogue.INTENT_LIST_REWARDS),
+        ("сколько у меня баллов", dialogue.INTENT_MY_POINTS),
+        ("какая у меня цель", dialogue.INTENT_MY_GOAL),
+        ("я выполнил зарядку", dialogue.INTENT_TASK_DONE),
+        ("хочу мороженое", dialogue.INTENT_WANT_REWARD),
+        ("какая погода", None),
+        ("", None),
+    ],
+)
+def test_detect_intent_falls_back_to_keywords(alice_event, phrase, expected_intent) -> None:
+    request = _request(alice_event, phrase)
+
+    assert dialogue.detect_intent(request) == expected_intent
+
+
+def test_detect_intent_prefers_nlu_intent(alice_event) -> None:
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_MY_POINTS)
+
+    assert dialogue.detect_intent(request) == dialogue.INTENT_MY_POINTS
+
+
+def test_button_payload_without_nlu_is_routed(alice_event, repository) -> None:
+    """Кнопка из ответа навыка: nlu.intents пуст, интент приходит в payload."""
+    event = alice_event("", payload={"intent": dialogue.INTENT_LIST_TASKS})
+    event["request"]["type"] = "ButtonPressed"
+
+    response = respond(AliceRequest.from_event(event), repository, TODAY)
+
+    assert "Задачи на сегодня" in response.text
+    assert repository.plan_requests == [("user-1", TODAY)]
+
+
+def test_voice_phrase_without_nlu_is_routed(alice_event, repository) -> None:
+    request = _request(alice_event, "сколько у меня баллов")
+
+    response = respond(request, repository, TODAY)
+
+    assert "420 баллов" in response.text
+
+
+@pytest.mark.parametrize(
     ("intent", "expected_text"),
     [
         (dialogue.INTENT_LIST_TASKS, "Задачи на сегодня"),

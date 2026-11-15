@@ -76,6 +76,33 @@ INTENTS_WITH_DAILY_PLAN = frozenset(
     }
 )
 
+# Резервное распознавание, пока интенты не натренированы в консоли Диалогов:
+# тогда nlu.intents пуст и без этой таблицы навык отвечал бы только справкой.
+# Ключи сравниваются как подстроки нормализованной фразы, порядок важен.
+KEYWORD_INTENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (INTENT_TASK_DONE, ("выполн", "сдела", "отметь", "готово", "закончи")),
+    (INTENT_WANT_REWARD, ("хочу", "купить", "получить", "дай")),
+    (INTENT_MY_POINTS, ("балл", "очк", "баланс")),
+    (INTENT_MY_GOAL, ("цел", "осталось", "копить")),
+    (INTENT_LIST_REWARDS, ("наград", "приз", "подар")),
+    (INTENT_LIST_TASKS, ("задач", "делать", "план", "сегодня")),
+)
+
+
+def detect_intent(request: AliceRequest) -> str | None:
+    """Определяет интент: NLU/кнопка, иначе ключевые слова фразы."""
+    if request.intent:
+        return request.intent
+
+    phrase = matching.normalize(f"{request.command} {request.original_utterance}")
+    if not phrase:
+        return None
+
+    for intent, keywords in KEYWORD_INTENTS:
+        if any(keyword in phrase for keyword in keywords):
+            return intent
+    return None
+
 
 def today_in_skill_timezone() -> dt.date:
     """Сегодняшняя дата по времени навыка (МСК)."""
@@ -93,7 +120,7 @@ def respond(
     ошибка (в том числе недоступность Postgres) стала валидным ответом.
     """
     today = today or today_in_skill_timezone()
-    intent = request.intent
+    intent = detect_intent(request)
 
     if intent in INTENTS_WITH_DAILY_PLAN:
         if not request.user_id:
