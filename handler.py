@@ -20,9 +20,9 @@ import os
 from typing import Any
 
 from alice_skill.config import load_settings
-from alice_skill.db import PostgresRepository
 from alice_skill.dialogue import respond
 from alice_skill.models import AliceRequest, AliceResponse
+from alice_skill.repository import PostgresSkillRepository
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -33,7 +33,7 @@ ERROR_TEXT = "Что-то пошло не так. Попробуйте ещё р
 # тип и текст исключения. Включайте только на время диагностики.
 DEBUG_ENV_VAR = "DEBUG_ERRORS"
 
-_repository: PostgresRepository | None = None
+_repository: PostgresSkillRepository | None = None
 
 
 def handler(event: dict[str, Any] | str, context: Any) -> dict[str, Any]:
@@ -100,7 +100,7 @@ def _http_response(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _get_repository() -> PostgresRepository:
+def _get_repository() -> PostgresSkillRepository:
     """Создаёт репозиторий один раз на инстанс функции.
 
     Cloud Functions переиспользует контейнер между вызовами, поэтому
@@ -108,5 +108,5 @@ def _get_repository() -> PostgresRepository:
     """
     global _repository
     if _repository is None:
-        _repository = PostgresRepository(load_settings())
+        _repository = PostgresSkillRepository(load_settings())
     return _repository

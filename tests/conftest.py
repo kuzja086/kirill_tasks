@@ -1,4 +1,4 @@
-"""Общие фикстуры тестов: подмена Postgres и генератор событий Алисы."""
+"""Общие фикстуры тестов: репозиторий и генератор событий Алисы."""
 
 from __future__ import annotations
 
@@ -6,25 +6,23 @@ from typing import Any, Callable
 
 import pytest
 
-
-class FakeUserRepository:
-    """In-memory реализация ``alice_skill.db.UserRepository``."""
-
-    def __init__(self) -> None:
-        self.users: dict[str, str] = {}
-        self.saved: list[tuple[str, str]] = []
-
-    def get_user_name(self, user_id: str) -> str | None:
-        return self.users.get(user_id)
-
-    def save_user_name(self, user_id: str, display_name: str) -> None:
-        self.users[user_id] = display_name
-        self.saved.append((user_id, display_name))
+from factories import FakeSkillRepository, make_assignment, make_reward
 
 
 @pytest.fixture
-def repository() -> FakeUserRepository:
-    return FakeUserRepository()
+def repository() -> FakeSkillRepository:
+    return FakeSkillRepository(
+        assignments=[
+            make_assignment(1, "Зарядка", points=10),
+            make_assignment(2, "Прочитать 20 минут", points=15),
+        ],
+        rewards=[
+            make_reward(1, "Мороженое", cost=350),
+            make_reward(2, "Настольная игра", cost=970),
+        ],
+        balance=420,
+    )
+
 
 
 @pytest.fixture

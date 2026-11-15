@@ -1,4 +1,4 @@
-"""Модели протокола навыков Яндекс.Диалогов (v1.0)."""
+"""Модели навыка: протокол Яндекс.Диалогов и предметные сущности."""
 
 from __future__ import annotations
 
@@ -6,6 +6,61 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from alice_skill.config import PROTOCOL_VERSION
+
+# Виды задач: ежедневные (повторяются каждый день) и случайные (выборка на день).
+KIND_DAILY = "daily"
+KIND_RANDOM = "random"
+
+# Статусы задачи в дневном плане.
+STATUS_PENDING = "pending"
+STATUS_AWAITING_CONFIRMATION = "awaiting_confirmation"
+STATUS_DONE = "done"
+STATUS_MISSED = "missed"
+
+# Результаты попытки потратить баллы на награду.
+REDEEM_OK = "ok"
+REDEEM_INSUFFICIENT = "insufficient"
+REDEEM_NOT_FOUND = "not_found"
+
+
+@dataclass(frozen=True)
+class Task:
+    """Задача из справочника."""
+
+    id: int
+    title: str
+    kind: str
+    points: int
+
+
+@dataclass(frozen=True)
+class Assignment:
+    """Задача, назначенная ребёнку на конкретный день."""
+
+    id: int
+    title: str
+    points: int
+    status: str = STATUS_PENDING
+
+
+@dataclass(frozen=True)
+class Reward:
+    """Награда из списка призов."""
+
+    id: int
+    title: str
+    cost: int
+
+
+@dataclass(frozen=True)
+class RedeemOutcome:
+    """Результат попытки потратить баллы на награду."""
+
+    status: str
+    balance: int
+    missing: int = 0
+    redemption_id: int | None = None
+    reward: Reward | None = None
 
 
 @dataclass(frozen=True)

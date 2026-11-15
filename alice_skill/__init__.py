@@ -4,4 +4,15 @@
 находится в корневом модуле ``handler``.
 """
 
-__all__ = ["config", "db", "dialogue", "models"]
+__all__ = [
+    "config",
+    "db",
+    "dialogue",
+    "economy",
+    "matching",
+    "models",
+    "plan",
+    "repository",
+    "text",
+]
+

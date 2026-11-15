@@ -31,9 +31,8 @@ def _http_event(alice_request: dict[str, Any], *, encode_body_as_base64: bool = 
 def test_handler_returns_http_integration_response(alice_event, repository, monkeypatch) -> None:
     monkeypatch.setattr(cloud_function, "_repository", repository)
     event = alice_event(
-        "запомни меня аня",
-        tokens=["запомни", "меня", "аня"],
-        intent="remember_name",
+        "какие задачи на сегодня",
+        intent="list_tasks",
     )
 
     response = cloud_function.handler(event, SimpleNamespace(request_id="req-1"))
@@ -44,8 +43,8 @@ def test_handler_returns_http_integration_response(alice_event, repository, monk
     payload = _payload(response)
     assert payload["version"] == "1.0"
     assert payload["response"]["end_session"] is False
-    assert "Аня" in payload["response"]["text"]
-    assert repository.saved == [("user-1", "Аня")]
+    assert "Зарядка" in payload["response"]["text"]
+    assert repository.plan_requests != []
 
 
 def test_handler_reads_request_from_http_body(alice_event, repository, monkeypatch) -> None:
@@ -59,24 +58,27 @@ def test_handler_reads_request_from_http_body(alice_event, repository, monkeypat
 
 def test_handler_reads_base64_encoded_body(alice_event, repository, monkeypatch) -> None:
     monkeypatch.setattr(cloud_function, "_repository", repository)
-    event = _http_event(alice_event("как меня зовут", intent="ask_name"), encode_body_as_base64=True)
+    event = _http_event(
+        alice_event("сколько у меня баллов", intent="my_points"),
+        encode_body_as_base64=True,
+    )
 
     response = cloud_function.handler(event, None)
 
-    assert "не знакомы" in _payload(response)["response"]["text"]
+    assert "420 баллов" in _payload(response)["response"]["text"]
 
 
 def test_handler_returns_valid_response_on_backend_error(alice_event, monkeypatch) -> None:
     class BrokenRepository:
-        def get_user_name(self, user_id: str) -> str | None:
+        def ensure_daily_plan(self, user_id, plan_date):
             raise RuntimeError("Postgres недоступен")
 
-        def save_user_name(self, user_id: str, display_name: str) -> None:
+        def get_balance(self, user_id: str) -> int:
             raise RuntimeError("Postgres недоступен")
 
     monkeypatch.setattr(cloud_function, "_repository", BrokenRepository())
 
-    response = cloud_function.handler(alice_event("как меня зовут", intent="ask_name"), None)
+    response = cloud_function.handler(alice_event("какие задачи", intent="list_tasks"), None)
 
     assert response["statusCode"] == 200
     assert _payload(response) == {
@@ -124,7 +126,7 @@ def test_repository_is_created_once(monkeypatch) -> None:
             created.append(settings)
 
     monkeypatch.setattr(cloud_function, "_repository", None)
-    monkeypatch.setattr(cloud_function, "PostgresRepository", DummyRepository)
+    monkeypatch.setattr(cloud_function, "PostgresSkillRepository", DummyRepository)
     monkeypatch.setattr(cloud_function, "load_settings", lambda: "settings")
 
     first = cloud_function._get_repository()
