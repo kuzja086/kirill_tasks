@@ -167,18 +167,30 @@ Invoke-RestMethod -Uri 'https://functions.yandexcloud.net/<id-функции>' -
 
 ### Формат события и ответа
 
-При вызове по HTTPS рантайм передаёт HTTP-событие: JSON навыка лежит в
-`event['body']` строкой (возможно, в base64 при `isBase64Encoded`), а ответ
-функция обязана вернуть в формате интеграции — иначе платформа отдаст пустое
-тело:
+Функция поддерживает три режима вызова, различая их по наличию `httpMethod`
+в событии (`handler._is_http_event`):
 
-```json
-{"statusCode": 200, "headers": {"Content-Type": "application/json; charset=utf-8"}, "body": "<JSON протокола Алисы>", "isBase64Encoded": false}
+| Режим | Событие | Ответ |
+|---|---|---|
+| HTTPS без параметров | HTTP-событие, JSON навыка в `event['body']` | `{statusCode, headers, body, isBase64Encoded}` — платформа подставляет `body` в тело HTTP-ответа |
+| HTTPS с `?integration=raw` | тело запроса как есть (строка с JSON) | чистый JSON протокола Алисы |
+| `yc serverless function invoke` | сам JSON Диалогов | чистый JSON протокола Алисы |
+
+**Для вебхука в консоли Яндекс.Диалогов используйте URL с `?integration=raw`:**
+
+```
+https://functions.yandexcloud.net/<id-функции>?integration=raw
 ```
 
-`handler.py` делает это сам (`_extract_request_payload` / `_http_response`) и
-одинаково работает при прямом вызове через `yc serverless function invoke`,
-где событием служит сам JSON Диалогов.
+Причина: консоль проверяет именно возвращаемое значение функции. Без
+`integration=raw` она видит HTTP-обёртку и отвечает ошибками
+«Отсутствует интент: response», «Отсутствует интент: start_account_linking»,
+«Недопустимое значение поля: version». С `integration=raw` функция получает
+запрос навыка напрямую и возвращает протокол без обёртки.
+
+Обычный URL (без параметра) тоже работает для живого навыка — там платформа
+сама разворачивает обёртку, — но проверка в консоли на нём спотыкается.
+
 
 ## Переменные окружения
 
@@ -232,9 +244,14 @@ yc serverless function create --name alice-skill
 yc serverless function allow-unauthenticated-invoke alice-skill
 ```
 
-URL функции вида `https://functions.yandexcloud.net/<id>` указывается в консоли
-Яндекс.Диалогов в поле «Webhook URL». Проверить только сборку архива:
-`./deploy.ps1 -FunctionId any -BuildOnly`.
+URL функции указывается в консоли Яндекс.Диалогов в поле «Webhook URL» —
+обязательно с `?integration=raw` (см. «Формат события и ответа»):
+
+```
+https://functions.yandexcloud.net/<id-функции>?integration=raw
+```
+
+Проверить только сборку архива: `./deploy.ps1 -FunctionId any -BuildOnly`.
 
 `deploy.ps1` сохранён в UTF-8 с BOM: Windows PowerShell 5.1 иначе читает кириллицу
 как ANSI и завершается ошибкой разбора (правило зафиксировано в `.editorconfig`).

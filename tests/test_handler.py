@@ -16,7 +16,11 @@ def _payload(response: dict[str, Any]) -> dict[str, Any]:
     return json.loads(response["body"])
 
 
-def _http_event(alice_request: dict[str, Any], *, encode_body_as_base64: bool = False) -> dict[str, Any]:
+def _http_event(
+    alice_request: dict[str, Any],
+    *,
+    encode_body_as_base64: bool = False,
+) -> dict[str, Any]:
     raw_body = json.dumps(alice_request, ensure_ascii=False)
     if encode_body_as_base64:
         raw_body = base64.b64encode(raw_body.encode("utf-8")).decode("ascii")
@@ -30,10 +34,7 @@ def _http_event(alice_request: dict[str, Any], *, encode_body_as_base64: bool = 
 
 def test_handler_returns_http_integration_response(alice_event, repository, monkeypatch) -> None:
     monkeypatch.setattr(cloud_function, "_repository", repository)
-    event = alice_event(
-        "какие задачи на сегодня",
-        intent="list_tasks",
-    )
+    event = _http_event(alice_event("какие задачи на сегодня", intent="list_tasks"))
 
     response = cloud_function.handler(event, SimpleNamespace(request_id="req-1"))
 
@@ -45,6 +46,31 @@ def test_handler_returns_http_integration_response(alice_event, repository, monk
     assert payload["response"]["end_session"] is False
     assert "Зарядка" in payload["response"]["text"]
     assert repository.plan_requests != []
+
+
+def test_handler_returns_plain_protocol_for_direct_invocation(
+    alice_event, repository, monkeypatch
+) -> None:
+    """Консоль Диалогов и `yc invoke` получают протокол без HTTP-обёртки."""
+    monkeypatch.setattr(cloud_function, "_repository", repository)
+    event = alice_event("сколько у меня баллов", intent="my_points")
+
+    response = cloud_function.handler(event, None)
+
+    assert set(response) == {"version", "response"}
+    assert response["version"] == "1.0"
+    assert "420 баллов" in response["response"]["text"]
+
+
+def test_handler_reads_raw_string_event(alice_event, repository, monkeypatch) -> None:
+    """Режим `?integration=raw`: событием приходит строка с JSON."""
+    monkeypatch.setattr(cloud_function, "_repository", repository)
+    event = json.dumps(alice_event("", is_new_session=True), ensure_ascii=False)
+
+    response = cloud_function.handler(event, None)
+
+    assert response["response"]["text"].startswith("Привет")
+    assert "statusCode" not in response
 
 
 def test_handler_reads_request_from_http_body(alice_event, repository, monkeypatch) -> None:
@@ -77,14 +103,27 @@ def test_handler_returns_valid_response_on_backend_error(alice_event, monkeypatc
             raise RuntimeError("Postgres недоступен")
 
     monkeypatch.setattr(cloud_function, "_repository", BrokenRepository())
+    event = _http_event(alice_event("какие задачи", intent="list_tasks"))
 
-    response = cloud_function.handler(alice_event("какие задачи", intent="list_tasks"), None)
+    response = cloud_function.handler(event, None)
 
     assert response["statusCode"] == 200
     assert _payload(response) == {
         "version": "1.0",
         "response": {"text": ERROR_TEXT, "end_session": False},
     }
+
+
+def test_handler_returns_error_protocol_for_direct_invocation(repository, monkeypatch) -> None:
+    monkeypatch.setattr(cloud_function, "_repository", repository)
+
+    response = cloud_function.handler(
+        {"session": {"new": True, "user": {"user_id": "user-1"}}, "request": {}},
+        None,
+    )
+
+    assert response["version"] == "1.0"
+    assert response["response"]["text"].startswith("Привет")
 
 
 def test_handler_returns_error_text_on_invalid_json(repository, monkeypatch) -> None:
@@ -103,7 +142,7 @@ def test_handler_echoes_request_version(alice_event, repository, monkeypatch) ->
 
     response = cloud_function.handler(event, None)
 
-    assert _payload(response)["version"] == "2.0"
+    assert response["version"] == "2.0"
 
 
 def test_error_text_hides_details_by_default(monkeypatch) -> None:
@@ -134,3 +173,4 @@ def test_repository_is_created_once(monkeypatch) -> None:
 
     assert first is second
     assert created == ["settings"]
+
