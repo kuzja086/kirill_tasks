@@ -89,6 +89,12 @@ $environmentLines = Get-Content -LiteralPath $envPath |
     Where-Object { $_ -match '^\s*[^#\s][^=]*=' } |
     ForEach-Object { $_.Trim() }
 
+# Переменные админки нужны только контейнеру admin, функцию они не касаются.
+$environmentLines = $environmentLines | Where-Object {
+    $name = ($_ -split '=', 2)[0].Trim()
+    $name -notmatch '^ADMIN_'
+}
+
 # Переменные, которые берутся из Lockbox, не передаём открытым текстом:
 # иначе одно и то же имя окажется и в --environment, и в --secret.
 $secretKeys = @($SecretKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })

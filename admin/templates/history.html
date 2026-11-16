@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>История начислений и штрафов</h1>
+
+<form method="get" action="/history" class="row" style="margin-bottom: 16px">
+  <select name="user_id">
+    <option value="">— выберите ребёнка —</option>
+    {% for user in users %}
+    <option value="{{ user }}" {% if user == selected %}selected{% endif %}>{{ user }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Показать</button>
+</form>
+
+{% if selected %}
+  {% if entries %}
+  <table>
+    <tr>
+      <th>Когда</th><th>Операция</th><th>Детали</th><th>Причина</th><th>Баллы</th>
+    </tr>
+    {% for entry in entries %}
+    <tr>
+      <td>{{ entry.created_at.strftime('%d.%m %H:%M') if entry.created_at else '' }}</td>
+      <td>{{ entry.reason|reason }}</td>
+      <td>{{ entry.details or '' }}</td>
+      <td>{{ entry.comment or '' }}</td>
+      <td class="{{ 'positive' if entry.delta >= 0 else 'negative' }}">
+        {{ '+' if entry.delta >= 0 else '' }}{{ entry.delta }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Операций пока нет.</p>
+  {% endif %}
+{% else %}
+  <p class="muted">Выберите ребёнка, чтобы увидеть историю начислений и штрафов.</p>
+{% endif %}
+{% endblock %}

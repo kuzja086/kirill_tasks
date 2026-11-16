@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Штрафы</h1>
+
+{% if message == 'created' %}<p class="ok">Заявка на штраф создана — она ждёт подтверждения.</p>{% endif %}
+{% if message == 'applied' %}<p class="ok">Штраф применён, баллы списаны.</p>{% endif %}
+{% if message == 'rejected' %}<p class="ok">Заявка отклонена, баллы не списаны.</p>{% endif %}
+{% if error == 'invalid' %}<p class="error">Проверьте сумму (1–100 баллов) и причину.</p>{% endif %}
+{% if error == 'limit' %}<p class="error">Слишком много заявок на штраф за сутки.</p>{% endif %}
+{% if error == 'missing' %}<p class="error">Заявка не найдена или уже обработана.</p>{% endif %}
+
+<div class="card">
+  <h2>Добавить штраф вручную</h2>
+  <form method="post" action="/penalties" class="row">
+    <input name="user_id" placeholder="ребёнок (user_id)" required>
+    <input name="points" type="number" min="1" max="100" placeholder="баллы" required>
+    <input name="comment" placeholder="причина" size="40" required>
+    <button type="submit">Добавить</button>
+  </form>
+  <p class="muted">Баллы списываются только после подтверждения — заявка появится в списке ниже.</p>
+</div>
+
+<div class="row" style="margin-bottom: 12px">
+  <a href="/penalties?status=awaiting_confirmation">Ждут подтверждения</a> ·
+  <a href="/penalties?status=applied">Применённые</a> ·
+  <a href="/penalties?status=rejected">Отклонённые</a> ·
+  <a href="/penalties?status=">Все</a>
+</div>
+
+{% if penalties %}
+<table>
+  <tr>
+    <th>#</th><th>Когда</th><th>Ребёнок</th><th>Баллы</th>
+    <th>Причина</th><th>Источник</th><th>Статус</th><th></th>
+  </tr>
+  {% for penalty in penalties %}
+  <tr>
+    <td>{{ penalty.id }}</td>
+    <td>{{ penalty.created_at.strftime('%d.%m %H:%M') if penalty.created_at else '' }}</td>
+    <td>{{ penalty.user_id }}</td>
+    <td class="negative">−{{ penalty.points }}</td>
+    <td>{{ penalty.comment }}</td>
+    <td>{{ penalty.source|source }}</td>
+    <td>{{ penalty.status|penalty_status }}</td>
+    <td class="row">
+      {% if penalty.status == 'awaiting_confirmation' %}
+      <form method="post" action="/penalties/{{ penalty.id }}/apply">
+        <button type="submit">Применить</button>
+      </form>
+      <form method="post" action="/penalties/{{ penalty.id }}/reject">
+        <button class="secondary" type="submit">Отклонить</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Заявок нет.</p>
+{% endif %}
+{% endblock %}

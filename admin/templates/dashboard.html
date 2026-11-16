@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Сводка</h1>
+
+<div class="card">
+  <p>
+    Заявок на выполнение: <strong>{{ pending_assignments|length }}</strong> ·
+    Заявок на штраф: <strong>{{ pending_penalties|length }}</strong>
+  </p>
+  <p class="row">
+    <a href="/assignments">Проверить заявки на выполнение</a>
+    <a href="/penalties">Штрафы</a>
+  </p>
+</div>
+
+<div class="card">
+  <h2>Заявки на штраф</h2>
+  {% if pending_penalties %}
+  <table>
+    <tr><th>#</th><th>Ребёнок</th><th>Баллы</th><th>Причина</th><th>Источник</th><th></th></tr>
+    {% for penalty in pending_penalties %}
+    <tr>
+      <td>{{ penalty.id }}</td>
+      <td>{{ penalty.user_id }}</td>
+      <td class="negative">−{{ penalty.points }}</td>
+      <td>{{ penalty.comment }}</td>
+      <td>{{ penalty.source|source }}</td>
+      <td><a href="/penalties">Обработать</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Заявок на штраф нет.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Балансы</h2>
+  {% if balances %}
+  <table>
+    <tr><th>Ребёнок</th><th>Баланс</th><th></th></tr>
+    {% for user, balance in balances.items() %}
+    <tr>
+      <td>{{ user }}</td>
+      <td class="{{ 'positive' if balance >= 0 else 'negative' }}">{{ balance|points }}</td>
+      <td><a href="/history?user_id={{ user }}">История</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Пока нет данных: ребёнок ещё не обращался к навыку.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Навык: админка{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; background: #f6f7f9; color: #1c1e21; }
+    header { background: #2b3a55; color: #fff; padding: 10px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    header a { color: #cfd8e8; text-decoration: none; font-size: 14px; }
+    header a:hover { color: #fff; }
+    header form { margin-left: auto; }
+    main { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    h2 { font-size: 17px; margin: 0 0 12px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 14px; vertical-align: top; }
+    th { background: #eef1f6; }
+    .card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+    .muted { color: #6b7280; font-size: 13px; }
+    .positive { color: #157347; }
+    .negative { color: #b02a37; }
+    button { padding: 5px 10px; border: 1px solid #2b3a55; background: #2b3a55; color: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    button.secondary { background: #fff; color: #2b3a55; }
+    input, select, textarea { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .error { color: #b02a37; }
+    .ok { color: #157347; }
+  </style>
+</head>
+<body>
+<header>
+  <strong>Навык: админка</strong>
+  <a href="/">Сводка</a>
+  <a href="/assignments">Заявки на выполнение</a>
+  <a href="/penalties">Штрафы</a>
+  <a href="/history">История</a>
+  <form method="post" action="/logout">
+    <button class="secondary" type="submit">Выйти</button>
+  </form>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

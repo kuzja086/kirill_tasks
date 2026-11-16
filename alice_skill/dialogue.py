@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import datetime as dt
 
-from alice_skill import matching, text
+from alice_skill import matching, penalties, text
 from alice_skill.models import (
+    PENALTY_CREATED,
+    PENALTY_LIMIT_EXCEEDED,
     REDEEM_INSUFFICIENT,
     REDEEM_OK,
     STATUS_AWAITING_CONFIRMATION,
@@ -36,6 +38,7 @@ INTENT_MY_GOAL = "my_goal"
 INTENT_LIST_REWARDS = "list_rewards"
 INTENT_TASK_DONE = "task_done"
 INTENT_WANT_REWARD = "want_reward"
+INTENT_ADD_PENALTY = "add_penalty"
 
 # Время навыка: по нему определяется «сегодня» для дневного плана.
 SKILL_TIMEZONE = dt.timezone(dt.timedelta(hours=3), name="MSK")
@@ -73,6 +76,7 @@ INTENTS_WITH_DAILY_PLAN = frozenset(
         INTENT_LIST_REWARDS,
         INTENT_TASK_DONE,
         INTENT_WANT_REWARD,
+        INTENT_ADD_PENALTY,
     }
 )
 
@@ -80,6 +84,7 @@ INTENTS_WITH_DAILY_PLAN = frozenset(
 # тогда nlu.intents пуст и без этой таблицы навык отвечал бы только справкой.
 # Ключи сравниваются как подстроки нормализованной фразы, порядок важен.
 KEYWORD_INTENTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (INTENT_ADD_PENALTY, ("штраф",)),
     (INTENT_TASK_DONE, ("выполн", "сдела", "отметь", "готово", "закончи")),
     (INTENT_WANT_REWARD, ("хочу", "купить", "получить", "дай")),
     (INTENT_MY_POINTS, ("балл", "очк", "баланс")),
@@ -139,6 +144,8 @@ def respond(
             return _list_rewards(repository, balance)
         if intent == INTENT_TASK_DONE:
             return _task_done(request, repository, assignments)
+        if intent == INTENT_ADD_PENALTY:
+            return _add_penalty(request, repository)
         return _want_reward(request, repository)
 
     if request.is_new_session and request.is_empty:
@@ -341,5 +348,50 @@ def _want_reward(request: AliceRequest, repository: SkillRepository) -> AliceRes
             )
         )
     return AliceResponse(text="Такой награды сейчас нет в списке.")
+
+
+def _phrase(request: AliceRequest) -> str:
+    """Текст фразы ребёнка: предпочитаем original_utterance, он богаче command."""
+    return (request.original_utterance or request.command).strip()
+
+
+def _add_penalty(request: AliceRequest, repository: SkillRepository) -> AliceResponse:
+    phrase = _phrase(request)
+    parsed = penalties.parse_penalty_phrase(phrase)
+
+    if parsed is None:
+        return AliceResponse(
+            text=(
+                "Не поняла сумму штрафа. Скажи, например: "
+                "«добавь штраф 10 баллов — не выключил свет»."
+            )
+        )
+    if not parsed.comment:
+        return AliceResponse(
+            text=(
+                f"За что штраф на {text.format_points(parsed.points)}? "
+                "Назови причину в той же фразе."
+            )
+        )
+
+    result = repository.add_penalty(request.user_id, parsed.points, parsed.comment)
+
+    if result.status == PENALTY_CREATED:
+        return AliceResponse(
+            text=(
+                f"Записала штраф {text.format_points(parsed.points)}: {parsed.comment}. "
+                "Он ждёт подтверждения взрослого — баллы пока не списаны."
+            )
+        )
+    if result.status == PENALTY_LIMIT_EXCEEDED:
+        return AliceResponse(
+            text=(
+                "Сегодня уже много заявок на штраф. "
+                "Попросите взрослого добавить его вручную."
+            )
+        )
+    return AliceResponse(
+        text=f"Штраф должен быть от 1 до {result.max_points} баллов, и нужна причина."
+    )
 
 

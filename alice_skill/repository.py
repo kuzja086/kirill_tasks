@@ -17,10 +17,18 @@ from alice_skill import economy, plan
 from alice_skill.config import Settings
 from alice_skill.db import CONNECTION_ERRORS, Database
 from alice_skill.models import (
+    PENALTY_CREATED,
+    PENALTY_INVALID,
+    PENALTY_LIMIT_EXCEEDED,
     REDEEM_INSUFFICIENT,
     REDEEM_NOT_FOUND,
     REDEEM_OK,
+    SOURCE_ALICE,
     Assignment,
+    LedgerEntry,
+    Penalty,
+    PenaltyResult,
+    PendingAssignment,
     RedeemOutcome,
     Reward,
     Task,
@@ -133,6 +141,84 @@ INSERT_REDEEM_LEDGER = """
     INSERT INTO points_ledger (user_id, delta, reason, reward_redemption_id)
     VALUES (%s, %s, 'reward_redeem', %s)
 """
+# --- SQL-КОНСТАНТЫ-ШТРАФОВ ---
+
+COUNT_RECENT_PENALTIES = """
+    SELECT count(*)
+      FROM penalties
+     WHERE user_id = %s
+       AND source = 'alice'
+       AND created_at >= now() - interval '1 day'
+"""
+
+INSERT_PENALTY = """
+    INSERT INTO penalties (user_id, points, comment, source)
+    VALUES (%s, %s, %s, %s)
+    RETURNING id, user_id, points, comment, source, status, created_at
+"""
+
+SELECT_PENALTIES = """
+    SELECT id, user_id, points, comment, source, status, created_at
+      FROM penalties
+     WHERE (%s::text IS NULL OR user_id = %s)
+       AND (%s::text IS NULL OR status = %s)
+     ORDER BY created_at DESC, id DESC
+     LIMIT %s
+"""
+
+CONFIRM_PENALTY = """
+    UPDATE penalties
+       SET status = 'applied', resolved_at = now(), resolved_by = %s
+     WHERE id = %s AND status = 'awaiting_confirmation'
+    RETURNING id, user_id, points, comment
+"""
+
+REJECT_PENALTY = """
+    UPDATE penalties
+       SET status = 'rejected', resolved_at = now(), resolved_by = %s
+     WHERE id = %s AND status = 'awaiting_confirmation'
+    RETURNING id
+"""
+
+INSERT_PENALTY_LEDGER = """
+    INSERT INTO points_ledger (user_id, delta, reason, comment)
+    VALUES (%s, %s, 'penalty', %s)
+    RETURNING id
+"""
+
+LINK_PENALTY_LEDGER = "UPDATE penalties SET ledger_id = %s WHERE id = %s"
+
+SELECT_LEDGER = """
+    SELECT l.id, l.created_at, l.delta, l.reason, l.comment,
+           COALESCE(a.title, r.title) AS details
+      FROM points_ledger l
+      LEFT JOIN daily_assignments a ON a.id = l.assignment_id
+      LEFT JOIN reward_redemptions r ON r.id = l.reward_redemption_id
+     WHERE l.user_id = %s
+     ORDER BY l.created_at DESC, l.id DESC
+     LIMIT %s
+"""
+
+SELECT_PENDING_ASSIGNMENTS = """
+    SELECT id, user_id, plan_date, title, points
+      FROM daily_assignments
+     WHERE status = 'awaiting_confirmation'
+     ORDER BY plan_date, id
+"""
+
+SELECT_USERS = """
+    SELECT user_id
+      FROM (
+            SELECT user_id FROM daily_assignments
+            UNION SELECT user_id FROM points_ledger
+            UNION SELECT user_id FROM penalties
+            UNION SELECT user_id FROM user_goals
+           ) AS known
+     ORDER BY user_id
+"""
+# --- ПРОТОКОЛ ---
+
+
 @runtime_checkable
 class SkillRepository(Protocol):
     """Интерфейс хранилища навыка: позволяет подменять Postgres в тестах."""
@@ -157,10 +243,46 @@ class SkillRepository(Protocol):
 
     def claim_assignment(self, assignment_id: int) -> str | None:
         """Переводит задачу в ожидание подтверждения и возвращает её статус."""
+
+    def add_penalty(
+        self,
+        user_id: str,
+        points: int,
+        comment: str,
+        *,
+        source: str = SOURCE_ALICE,
+    ) -> PenaltyResult:
+        """Создаёт заявку на штраф; баллы списываются только после подтверждения."""
+
+    def confirm_penalty(self, penalty_id: int, *, resolved_by: str = "admin") -> bool:
+        """Подтверждает штраф: списывает баллы и пишет причину в журнал."""
+
+    def reject_penalty(self, penalty_id: int, *, resolved_by: str = "admin") -> bool:
+        """Отклоняет заявку на штраф: баллы не меняются."""
+
+    def list_penalties(
+        self,
+        *,
+        user_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[Penalty]:
+        """Заявки на штраф, свежие сверху."""
+
+    def list_ledger(self, user_id: str, *, limit: int = 50) -> list[LedgerEntry]:
+        """История начислений и списаний с причинами."""
+
+    def list_pending_assignments(self) -> list[PendingAssignment]:
+        """Заявки на выполнение, ждущие подтверждения."""
+
+    def list_users(self) -> list[str]:
+        """Идентификаторы всех известных детей."""
+
 class PostgresSkillRepository:
     """Реализация :class:`SkillRepository` поверх Postgres."""
 
     def __init__(self, settings: Settings, *, database: Database | None = None) -> None:
+        self._settings = settings
         self._db = database if database is not None else Database(settings)
 
     # --- чтение ---
@@ -205,6 +327,50 @@ class PostgresSkillRepository:
     def reject_assignment(self, assignment_id: int) -> None:
         """Отклоняет заявку: задача «missed», баллы списываются."""
         self._run(lambda cursor: cursor.execute(REJECT_ASSIGNMENT, (assignment_id,)))
+
+    # --- штрафы, история и данные для админки ---
+
+    def add_penalty(
+        self,
+        user_id: str,
+        points: int,
+        comment: str,
+        *,
+        source: str = SOURCE_ALICE,
+    ) -> PenaltyResult:
+        return self._run(
+            lambda cursor: self._add_penalty(cursor, user_id, points, comment, source),
+            lock_user=user_id,
+        )
+
+    def confirm_penalty(self, penalty_id: int, *, resolved_by: str = "admin") -> bool:
+        return self._run(
+            lambda cursor: self._confirm_penalty(cursor, penalty_id, resolved_by)
+        )
+
+    def reject_penalty(self, penalty_id: int, *, resolved_by: str = "admin") -> bool:
+        return self._run(lambda cursor: self._reject_penalty(cursor, penalty_id, resolved_by))
+
+    def list_penalties(
+        self,
+        *,
+        user_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[Penalty]:
+        return self._run(
+            lambda cursor: self._select_penalties(cursor, user_id, status, limit)
+        )
+
+    def list_ledger(self, user_id: str, *, limit: int = 50) -> list[LedgerEntry]:
+        return self._run(lambda cursor: self._select_ledger(cursor, user_id, limit))
+
+    def list_pending_assignments(self) -> list[PendingAssignment]:
+        return self._run(self._select_pending_assignments)
+
+    def list_users(self) -> list[str]:
+        return self._run(self._select_users)
+
 
     def close(self) -> None:
         self._db.reset()
@@ -343,6 +509,127 @@ class PostgresSkillRepository:
             redemption_id=redemption_id,
             reward=reward,
         )
+
+    def _add_penalty(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        user_id: str,
+        points: int,
+        comment: str,
+        source: str,
+    ) -> PenaltyResult:
+        text = (comment or "").strip()
+        max_points = self._settings.penalty_max_points
+        if points <= 0 or points > max_points or not text:
+            return PenaltyResult(status=PENALTY_INVALID, max_points=max_points)
+
+        cursor.execute(COUNT_RECENT_PENALTIES, (user_id,))
+        recent = int(cursor.fetchone()[0])
+        if recent >= self._settings.penalty_daily_limit:
+            return PenaltyResult(status=PENALTY_LIMIT_EXCEEDED, daily_count=recent)
+
+        cursor.execute(INSERT_PENALTY, (user_id, points, text, source))
+        row = cursor.fetchone()
+        return PenaltyResult(
+            status=PENALTY_CREATED,
+            daily_count=recent + 1,
+            max_points=max_points,
+            penalty=Penalty(
+                id=row[0],
+                user_id=row[1],
+                points=row[2],
+                comment=row[3],
+                source=row[4],
+                status=row[5],
+                created_at=row[6],
+            ),
+        )
+
+    def _confirm_penalty(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        penalty_id: int,
+        resolved_by: str,
+    ) -> bool:
+        cursor.execute(CONFIRM_PENALTY, (resolved_by, penalty_id))
+        row = cursor.fetchone()
+        if row is None:
+            return False
+
+        _, user_id, points, comment = row
+        cursor.execute(INSERT_PENALTY_LEDGER, (user_id, -points, comment))
+        ledger_id = int(cursor.fetchone()[0])
+        cursor.execute(LINK_PENALTY_LEDGER, (ledger_id, penalty_id))
+        return True
+
+    def _reject_penalty(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        penalty_id: int,
+        resolved_by: str,
+    ) -> bool:
+        cursor.execute(REJECT_PENALTY, (resolved_by, penalty_id))
+        return cursor.fetchone() is not None
+
+    def _select_penalties(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        user_id: str | None,
+        status: str | None,
+        limit: int,
+    ) -> list[Penalty]:
+        cursor.execute(SELECT_PENALTIES, (user_id, user_id, status, status, limit))
+        return [
+            Penalty(
+                id=row[0],
+                user_id=row[1],
+                points=row[2],
+                comment=row[3],
+                source=row[4],
+                status=row[5],
+                created_at=row[6],
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def _select_ledger(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        user_id: str,
+        limit: int,
+    ) -> list[LedgerEntry]:
+        cursor.execute(SELECT_LEDGER, (user_id, limit))
+        return [
+            LedgerEntry(
+                id=row[0],
+                created_at=row[1],
+                delta=row[2],
+                reason=row[3],
+                comment=row[4],
+                details=row[5],
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def _select_pending_assignments(
+        self,
+        cursor: psycopg2.extensions.cursor,
+    ) -> list[PendingAssignment]:
+        cursor.execute(SELECT_PENDING_ASSIGNMENTS)
+        return [
+            PendingAssignment(
+                id=row[0],
+                user_id=row[1],
+                plan_date=row[2],
+                title=row[3],
+                points=row[4],
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def _select_users(self, cursor: psycopg2.extensions.cursor) -> list[str]:
+        cursor.execute(SELECT_USERS)
+        return [str(row[0]) for row in cursor.fetchall()]
 
 
 

@@ -1,0 +1,21 @@
+# Веб-админка навыка: заявки на выполнение, штрафы и история операций.
+# Запуск из корня репозитория:
+#   docker compose up -d --build
+# Пароль задаётся в .env: ADMIN_PASSWORD (обязательно), ADMIN_SECRET_KEY.
+services:
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    image: alice-skill-admin
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ADMIN_HOST: 0.0.0.0
+      ADMIN_PORT: "8080"
+      # Позволяет подключаться по IP, когда DNS в окружении отдаёт неверный адрес:
+      #   $env:PG_HOSTADDR='1.2.3.4'; docker compose up -d --build
+      PG_HOSTADDR: ${PG_HOSTADDR:-}
+    ports:
+      - "8080:8080"

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Заявки на выполнение</h1>
+
+{% if request.query_params.get('message') == 'confirmed' %}
+<p class="ok">Задача подтверждена, баллы начислены.</p>
+{% elif request.query_params.get('message') == 'rejected' %}
+<p class="ok">Задача отклонена, баллы списаны.</p>
+{% endif %}
+
+{% if assignments %}
+<table>
+  <tr>
+    <th>#</th><th>Ребёнок</th><th>Дата</th><th>Задача</th><th>Баллы</th><th></th>
+  </tr>
+  {% for item in assignments %}
+  <tr>
+    <td>{{ item.id }}</td>
+    <td>{{ item.user_id }}</td>
+    <td>{{ item.plan_date }}</td>
+    <td>{{ item.title }}</td>
+    <td>{{ item.points|points }}</td>
+    <td class="row">
+      <form method="post" action="/assignments/{{ item.id }}/confirm">
+        <button type="submit">Подтвердить</button>
+      </form>
+      <form method="post" action="/assignments/{{ item.id }}/reject">
+        <button class="secondary" type="submit">Отклонить</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">Отклонение списывает баллы: ребёнок заявил о выполнении, но задача не сделана.</p>
+{% else %}
+<p class="muted">Заявок нет.</p>
+{% endif %}
+{% endblock %}

@@ -111,8 +111,14 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("pending", help="показать заявки, ждущие подтверждения")
 
     for name in ("confirm", "reject"):
-        action_parser = subparsers.add_parser(name, help=f"{name} заявку по id")
+        action_parser = subparsers.add_parser(name, help=f"{name} заявку на выполнение по id")
         action_parser.add_argument("assignment_id", type=int)
+
+    subparsers.add_parser("penalties", help="последние заявки на штраф")
+
+    for name in ("apply-penalty", "reject-penalty"):
+        penalty_parser = subparsers.add_parser(name, help=f"{name} заявку на штраф по id")
+        penalty_parser.add_argument("penalty_id", type=int)
 
     args = parser.parse_args(argv)
 
@@ -153,6 +159,35 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "confirm":
             repository.confirm_assignment(args.assignment_id)
             print(f"Заявка #{args.assignment_id} подтверждена, баллы начислены.")
+            return 0
+
+        if args.command == "penalties":
+            penalties = repository.list_penalties(limit=20)
+            if not penalties:
+                print("Заявок на штраф нет.")
+            for penalty in penalties:
+                print(
+                    f"#{penalty.id}  {penalty.status:22} "
+                    f"{text.format_points(penalty.points):>12}  {penalty.comment}  ({penalty.source})"
+                )
+            return 0
+
+        if args.command == "apply-penalty":
+            applied = repository.confirm_penalty(args.penalty_id, resolved_by="local-cli")
+            print(
+                "Штраф применён, баллы списаны."
+                if applied
+                else "Заявка не найдена или уже обработана."
+            )
+            return 0
+
+        if args.command == "reject-penalty":
+            rejected = repository.reject_penalty(args.penalty_id, resolved_by="local-cli")
+            print(
+                "Заявка на штраф отклонена, баллы не списаны."
+                if rejected
+                else "Заявка не найдена или уже обработана."
+            )
             return 0
 
         repository.reject_assignment(args.assignment_id)

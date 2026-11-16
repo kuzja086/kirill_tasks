@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +22,20 @@ STATUS_MISSED = "missed"
 REDEEM_OK = "ok"
 REDEEM_INSUFFICIENT = "insufficient"
 REDEEM_NOT_FOUND = "not_found"
+
+# Статусы заявки на штраф: баллы списываются только при подтверждении.
+PENALTY_AWAITING = "awaiting_confirmation"
+PENALTY_APPLIED = "applied"
+PENALTY_REJECTED = "rejected"
+
+# Источник заявки на штраф.
+SOURCE_ALICE = "alice"
+SOURCE_ADMIN = "admin"
+
+# Результаты создания заявки на штраф.
+PENALTY_CREATED = "created"
+PENALTY_LIMIT_EXCEEDED = "limit_exceeded"
+PENALTY_INVALID = "invalid"
 
 
 @dataclass(frozen=True)
@@ -61,6 +76,52 @@ class RedeemOutcome:
     missing: int = 0
     redemption_id: int | None = None
     reward: Reward | None = None
+
+
+@dataclass(frozen=True)
+class Penalty:
+    """Заявка на штраф."""
+
+    id: int
+    user_id: str
+    points: int
+    comment: str
+    source: str
+    status: str
+    created_at: dt.datetime | None = None
+
+
+@dataclass(frozen=True)
+class PenaltyResult:
+    """Результат создания заявки на штраф."""
+
+    status: str
+    penalty: Penalty | None = None
+    daily_count: int = 0
+    max_points: int = 0
+
+
+@dataclass(frozen=True)
+class LedgerEntry:
+    """Запись журнала баллов для истории в админке."""
+
+    id: int
+    delta: int
+    reason: str
+    comment: str | None = None
+    details: str | None = None
+    created_at: dt.datetime | None = None
+
+
+@dataclass(frozen=True)
+class PendingAssignment:
+    """Заявка на выполнение, ждущая подтверждения взрослым."""
+
+    id: int
+    user_id: str
+    plan_date: dt.date
+    title: str
+    points: int
 
 
 @dataclass(frozen=True)

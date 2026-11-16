@@ -12,6 +12,10 @@ DEFAULT_PORT = 5432
 DEFAULT_SSLMODE = "prefer"
 DEFAULT_CONNECT_TIMEOUT = 5
 
+# Ограничения на заявки о штрафах, чтобы ребёнок не мог «накрутить» списание.
+DEFAULT_PENALTY_MAX_POINTS = 100
+DEFAULT_PENALTY_DAILY_LIMIT = 5
+
 REQUIRED_VARIABLES = ("PG_HOST", "PG_DATABASE", "PG_USER", "PG_PASSWORD")
 
 # Значения, которые принимает libpq.
@@ -48,6 +52,8 @@ class Settings:
     pg_sslmode: str = DEFAULT_SSLMODE
     pg_connect_timeout: int = DEFAULT_CONNECT_TIMEOUT
     pg_hostaddr: str | None = None
+    penalty_max_points: int = DEFAULT_PENALTY_MAX_POINTS
+    penalty_daily_limit: int = DEFAULT_PENALTY_DAILY_LIMIT
 
     @property
     def connection_params(self) -> dict[str, str | int]:
@@ -97,6 +103,16 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             "PG_CONNECT_TIMEOUT",
         ),
         pg_hostaddr=(source.get("PG_HOSTADDR") or "").strip() or None,
+        penalty_max_points=_as_int(
+            source.get("PENALTY_MAX_POINTS"),
+            DEFAULT_PENALTY_MAX_POINTS,
+            "PENALTY_MAX_POINTS",
+        ),
+        penalty_daily_limit=_as_int(
+            source.get("PENALTY_DAILY_LIMIT"),
+            DEFAULT_PENALTY_DAILY_LIMIT,
+            "PENALTY_DAILY_LIMIT",
+        ),
     )
 
 

@@ -9,6 +9,7 @@ import pytest
 from alice_skill import dialogue
 from alice_skill.dialogue import respond
 from alice_skill.models import (
+    PENALTY_AWAITING,
     STATUS_AWAITING_CONFIRMATION,
     STATUS_DONE,
     AliceRequest,
@@ -250,6 +251,75 @@ def test_voice_phrase_without_nlu_is_routed(alice_event, repository) -> None:
     response = respond(request, repository, TODAY)
 
     assert "420 баллов" in response.text
+
+
+def test_add_penalty_creates_request_without_deduction(alice_event, repository) -> None:
+    request = _request(
+        alice_event,
+        "добавь штраф 10 баллов — не выключил свет",
+        intent=dialogue.INTENT_ADD_PENALTY,
+    )
+
+    response = respond(request, repository, TODAY)
+
+    assert "10 баллов" in response.text
+    assert "не выключил свет" in response.text
+    assert "ждёт подтверждения взрослого" in response.text
+    assert len(repository.penalties) == 1
+    assert repository.penalties[0].status == PENALTY_AWAITING
+    assert repository.balance == 420, "баллы не должны списываться до подтверждения"
+
+
+def test_add_penalty_without_amount_explains_format(alice_event, repository) -> None:
+    request = _request(alice_event, "добавь штраф", intent=dialogue.INTENT_ADD_PENALTY)
+
+    response = respond(request, repository, TODAY)
+
+    assert "Не поняла сумму штрафа" in response.text
+    assert repository.penalties == []
+
+
+def test_add_penalty_without_reason_asks_for_it(alice_event, repository) -> None:
+    request = _request(alice_event, "добавь штраф 15 баллов", intent=dialogue.INTENT_ADD_PENALTY)
+
+    response = respond(request, repository, TODAY)
+
+    assert "За что штраф" in response.text
+    assert repository.penalties == []
+
+
+def test_add_penalty_is_recognized_by_keyword(alice_event, repository) -> None:
+    request = _request(alice_event, "штраф пять баллов за беспорядок")
+
+    assert dialogue.detect_intent(request) == dialogue.INTENT_ADD_PENALTY
+
+    response = respond(request, repository, TODAY)
+
+    assert len(repository.penalties) == 1
+    assert repository.penalties[0].points == 5
+    assert repository.penalties[0].comment == "беспорядок"
+
+
+def test_add_penalty_respects_daily_limit(alice_event, repository) -> None:
+    repository.daily_limit = 1
+    first = _request(alice_event, "штраф 5 баллов за шум", intent=dialogue.INTENT_ADD_PENALTY)
+    second = _request(alice_event, "штраф 5 баллов за шум", intent=dialogue.INTENT_ADD_PENALTY)
+
+    respond(first, repository, TODAY)
+    response = respond(second, repository, TODAY)
+
+    assert "много заявок на штраф" in response.text
+    assert len(repository.penalties) == 1
+
+
+def test_add_penalty_rejects_amount_above_limit(alice_event, repository) -> None:
+    repository.max_points = 20
+    request = _request(alice_event, "штраф 50 баллов за шум", intent=dialogue.INTENT_ADD_PENALTY)
+
+    response = respond(request, repository, TODAY)
+
+    assert "от 1 до 20 баллов" in response.text
+    assert repository.penalties == []
 
 
 @pytest.mark.parametrize(
