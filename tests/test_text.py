@@ -46,12 +46,12 @@ def test_format_task_line_shows_waiting_status() -> None:
 
 
 def test_format_reward_line_when_affordable() -> None:
-    reward = make_reward(1, "Мороженое", cost=350)
+    reward = make_reward(1, "Мороженое", cost=25)
 
-    assert format_reward_line(reward, 400, 1) == "1) Мороженое — 350 баллов, можно брать"
+    assert format_reward_line(reward, 30, 1) == "1) Мороженое — 25 баллов, можно брать"
 
 
 def test_format_reward_line_when_not_affordable() -> None:
-    reward = make_reward(2, "Настольная игра", cost=970)
+    reward = make_reward(2, "Настольная игра", cost=70)
 
-    assert format_reward_line(reward, 420) == "Настольная игра — 970 баллов, накопить ещё 550 баллов"
+    assert format_reward_line(reward, 15) == "Настольная игра — 70 баллов, накопить ещё 55 баллов"

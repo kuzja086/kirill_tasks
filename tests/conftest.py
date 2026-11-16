@@ -13,14 +13,14 @@ from factories import FakeSkillRepository, make_assignment, make_reward
 def repository() -> FakeSkillRepository:
     return FakeSkillRepository(
         assignments=[
-            make_assignment(1, "Зарядка", points=10),
-            make_assignment(2, "Прочитать 20 минут", points=15),
+            make_assignment(1, "Зарядка", points=2),
+            make_assignment(2, "Прочитать 20 минут", points=2),
         ],
         rewards=[
-            make_reward(1, "Мороженое", cost=350),
-            make_reward(2, "Настольная игра", cost=970),
+            make_reward(1, "Мороженое", cost=25),
+            make_reward(2, "Настольная игра", cost=70),
         ],
-        balance=420,
+        balance=30,
     )
 
 

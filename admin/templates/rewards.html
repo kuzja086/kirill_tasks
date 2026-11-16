@@ -16,15 +16,21 @@
     <button type="submit">Добавить</button>
   </form>
   <p class="muted">
-    Стоимость — сколько баллов ребёнок копит. Ориентир: награда «на неделю»
-    стоит примерно столько, сколько он зарабатывает за неделю.
+    Стоимость — сколько баллов ребёнок копит.
+    {% if daily_earn %}
+    Ориентир: награда «на неделю» стоит примерно столько, сколько он
+    зарабатывает за неделю ({{ daily_earn }} баллов в день × 7 = {{ daily_earn * 7 }}).
+    {% else %}
+    Подсказка «≈ дней копить» появится, когда в справочнике будут задачи:
+    она считается от планового дня.
+    {% endif %}
   </p>
 </div>
 
 {% if rewards %}
 <table>
   <tr>
-    <th>#</th><th>Название</th><th>Стоимость</th><th>Доступна</th><th></th>
+    <th>#</th><th>Название</th><th>Стоимость</th><th>≈ дней копить</th><th>Доступна</th><th></th>
   </tr>
   {% for reward in rewards %}
   <tr>
@@ -37,6 +43,7 @@
       <input form="reward-{{ reward.id }}" name="cost" type="number" min="1" step="1"
              value="{{ reward.cost }}" style="width: 110px" required>
     </td>
+    <td>{{ reward.cost|days_to_earn(planned_daily_points) }}</td>
     <td>
       <input form="reward-{{ reward.id }}" type="checkbox" name="is_active" value="true"
              {% if reward.is_active %}checked{% endif %}>
@@ -50,6 +57,9 @@
   {% endfor %}
 </table>
 <p class="muted">
+  «≈ дней копить» — стоимость ÷ дневной заработок
+  ({{ planned_daily_points }} плановых × 80% = {{ daily_earn }} баллов),
+  округление вверх. Цена около 70 — это примерно неделя накоплений.
   Выключенная награда исчезает из списка у Алисы, но остаётся в истории.
 </p>
 {% else %}

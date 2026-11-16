@@ -15,6 +15,8 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from admin.labels import kind_label, penalty_status_label, reason_label, source_label
+from alice_skill import economy
+from alice_skill.config import DEFAULT_PENALTY_MAX_POINTS
 from alice_skill.models import (
     KIND_DAILY,
     PENALTY_AWAITING,
@@ -22,6 +24,7 @@ from alice_skill.models import (
     PENALTY_LIMIT_EXCEEDED,
     SOURCE_ADMIN,
     TASK_KINDS,
+    TASK_MAX_POINTS,
 )
 from alice_skill.repository import DuplicateTitleError, SkillRepository
 from alice_skill.text import format_points
@@ -35,6 +38,7 @@ def create_app(
     password: str,
     secret_key: str = "admin-secret",
     session_max_age: int = 12 * 60 * 60,
+    penalty_max_points: int = DEFAULT_PENALTY_MAX_POINTS,
 ) -> FastAPI:
     """Создаёт приложение админки поверх репозитория навыка."""
     expected_password = password
@@ -52,6 +56,23 @@ def create_app(
     templates.env.filters["penalty_status"] = penalty_status_label
     templates.env.filters["source"] = source_label
     templates.env.filters["kind"] = kind_label
+
+    def days_to_earn(cost: int, planned: int) -> str:
+        """Сколько дней копить награду; «—», если плана дня ещё нет."""
+        try:
+            return str(economy.days_to_earn(cost, planned))
+        except ValueError:
+            return "—"
+
+    def day_share(points: int, planned: int) -> str:
+        """Доля планового дня в процентах; «—», если плана дня ещё нет."""
+        try:
+            return str(economy.daily_share_percent(points, planned))
+        except ValueError:
+            return "—"
+
+    templates.env.filters["days_to_earn"] = days_to_earn
+    templates.env.filters["day_share"] = day_share
 
     def guard(request: Request) -> RedirectResponse | None:
         if not request.session.get("authenticated"):
@@ -156,6 +177,7 @@ def create_app(
                 "status": status,
                 "message": message,
                 "error": error,
+                "penalty_max_points": penalty_max_points,
             },
         )
 
@@ -228,12 +250,15 @@ def create_app(
         if redirect is not None:
             return redirect
 
+        tasks = repository.list_tasks()
         return render(
             request,
             "tasks.html",
             {
-                "tasks": repository.list_tasks(),
+                "tasks": tasks,
                 "kinds": [(kind, kind_label(kind)) for kind in TASK_KINDS],
+                "planned_daily_points": economy.planned_daily_points(tasks),
+                "task_max_points": TASK_MAX_POINTS,
                 "message": message,
                 "error": error,
             },
@@ -293,11 +318,14 @@ def create_app(
         if redirect is not None:
             return redirect
 
+        planned = economy.planned_daily_points(repository.list_tasks())
         return render(
             request,
             "rewards.html",
             {
                 "rewards": repository.list_all_rewards(),
+                "planned_daily_points": planned,
+                "daily_earn": economy.realistic_daily_points(planned) if planned > 0 else 0,
                 "message": message,
                 "error": error,
             },

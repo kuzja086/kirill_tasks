@@ -13,8 +13,9 @@ DEFAULT_SSLMODE = "prefer"
 DEFAULT_CONNECT_TIMEOUT = 5
 
 # Ограничения на заявки о штрафах, чтобы ребёнок не мог «накрутить» списание.
-DEFAULT_PENALTY_MAX_POINTS = 100
-DEFAULT_PENALTY_DAILY_LIMIT = 5
+# Максимум — дневной план целиком (10–13 баллов), не больше трёх заявок в сутки.
+DEFAULT_PENALTY_MAX_POINTS = 10
+DEFAULT_PENALTY_DAILY_LIMIT = 3
 
 REQUIRED_VARIABLES = ("PG_HOST", "PG_DATABASE", "PG_USER", "PG_PASSWORD")
 

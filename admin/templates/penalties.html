@@ -5,7 +5,7 @@
 {% if message == 'created' %}<p class="ok">Заявка на штраф создана — она ждёт подтверждения.</p>{% endif %}
 {% if message == 'applied' %}<p class="ok">Штраф применён, баллы списаны.</p>{% endif %}
 {% if message == 'rejected' %}<p class="ok">Заявка отклонена, баллы не списаны.</p>{% endif %}
-{% if error == 'invalid' %}<p class="error">Проверьте сумму (1–100 баллов) и причину.</p>{% endif %}
+{% if error == 'invalid' %}<p class="error">Проверьте сумму (1–{{ penalty_max_points }} баллов) и причину.</p>{% endif %}
 {% if error == 'limit' %}<p class="error">Слишком много заявок на штраф за сутки.</p>{% endif %}
 {% if error == 'missing' %}<p class="error">Заявка не найдена или уже обработана.</p>{% endif %}
 
@@ -13,7 +13,7 @@
   <h2>Добавить штраф вручную</h2>
   <form method="post" action="/penalties" class="row">
     <input name="user_id" placeholder="ребёнок (user_id)" required>
-    <input name="points" type="number" min="1" max="100" placeholder="баллы" required>
+    <input name="points" type="number" min="1" max="{{ penalty_max_points }}" placeholder="баллы" required>
     <input name="comment" placeholder="причина" size="40" required>
     <button type="submit">Добавить</button>
   </form>

@@ -61,7 +61,7 @@ def test_handler_returns_plain_protocol_for_direct_invocation(
 
     assert set(response) == {"version", "response"}
     assert response["version"] == "1.0"
-    assert "420 баллов" in response["response"]["text"]
+    assert "30 баллов" in response["response"]["text"]
 
 
 def test_handler_reads_raw_string_event(alice_event, repository, monkeypatch) -> None:
@@ -93,7 +93,7 @@ def test_handler_reads_base64_encoded_body(alice_event, repository, monkeypatch)
 
     response = cloud_function.handler(event, None)
 
-    assert "420 баллов" in _payload(response)["response"]["text"]
+    assert "30 баллов" in _payload(response)["response"]["text"]
 
 
 def test_handler_returns_valid_response_on_backend_error(alice_event, monkeypatch) -> None:

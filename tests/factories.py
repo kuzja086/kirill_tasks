@@ -80,8 +80,8 @@ class FakeSkillRepository:
         *,
         tasks: list[Task] | None = None,
         user_id: str = "user-1",
-        max_points: int = 100,
-        daily_limit: int = 5,
+        max_points: int = 10,
+        daily_limit: int = 3,
     ) -> None:
         self.assignments = list(assignments or [])
         self.rewards = list(rewards or [])

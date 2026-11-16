@@ -53,7 +53,7 @@ def test_login_with_wrong_password() -> None:
 def test_dashboard_shows_balances_and_counts() -> None:
     repository = FakeSkillRepository(
         assignments=[make_assignment(1, "Зарядка", status=STATUS_AWAITING_CONFIRMATION)],
-        balance=420,
+        balance=30,
     )
     repository.add_penalty("user-1", 10, "не выключил свет")
     client = _client(repository)
@@ -63,7 +63,7 @@ def test_dashboard_shows_balances_and_counts() -> None:
 
     assert response.status_code == 200
     assert "Сводка" in response.text
-    assert "420 баллов" in response.text
+    assert "30 баллов" in response.text
     assert "не выключил свет" in response.text
 
 
@@ -132,14 +132,14 @@ def test_manual_penalty_creates_request() -> None:
 
     response = client.post(
         "/penalties",
-        data={"user_id": "user-1", "points": "15", "comment": "разбил чашку"},
+        data={"user_id": "user-1", "points": "5", "comment": "разбил чашку"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert len(repository.penalties) == 1
     assert repository.penalties[0].source == "admin"
-    assert repository.penalties[0].points == 15
+    assert repository.penalties[0].points == 5
     assert repository.penalties[0].comment == "разбил чашку"
 
 
@@ -259,14 +259,14 @@ def test_task_can_be_edited_and_disabled() -> None:
 
     response = client.post(
         "/tasks/1",
-        data={"title": "Зарядка утром", "kind": "daily", "points": "15"},
+        data={"title": "Зарядка утром", "kind": "daily", "points": "5"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert response.headers["location"].endswith("message=updated")
     assert repository.tasks[0].title == "Зарядка утром"
-    assert repository.tasks[0].points == 15
+    assert repository.tasks[0].points == 5
     assert repository.tasks[0].is_active is False
 
 
@@ -284,8 +284,44 @@ def test_editing_unknown_task_reports_missing() -> None:
     assert response.headers["location"].endswith("error=missing")
 
 
+def test_tasks_page_shows_planned_day_and_share() -> None:
+    repository = FakeSkillRepository(
+        tasks=[
+            make_task(1, "Зарядка", points=10),
+            make_task(2, "Погулять", kind="random", points=2),
+            make_task(3, "Нарисовать", kind="random", points=1),
+        ]
+    )
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/tasks")
+
+    assert "План дня сейчас — 13 баллов" in page.text
+    assert "77%" in page.text
+
+
+def test_rewards_page_shows_days_to_earn() -> None:
+    repository = FakeSkillRepository(
+        tasks=[
+            make_task(1, "Зарядка", points=10),
+            make_task(2, "Погулять", kind="random", points=2),
+            make_task(3, "Нарисовать", kind="random", points=1),
+        ],
+        rewards=[make_reward(1, "Наклейка", cost=10), make_reward(2, "Настольная игра", cost=70)],
+    )
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/rewards")
+
+    assert "10 баллов в день × 7 = 70" in page.text
+    assert "≈ дней копить" in page.text
+    assert "<td>7</td>" in page.text
+
+
 def test_reward_cost_can_be_edited() -> None:
-    repository = FakeSkillRepository(rewards=[make_reward(1, "Мороженое", cost=350)])
+    repository = FakeSkillRepository(rewards=[make_reward(1, "Мороженое", cost=25)])
     client = _client(repository)
     _login(client)
 
@@ -294,13 +330,13 @@ def test_reward_cost_can_be_edited() -> None:
 
     response = client.post(
         "/rewards/1",
-        data={"title": "Мороженое", "cost": "300", "is_active": "true"},
+        data={"title": "Мороженое", "cost": "20", "is_active": "true"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
     assert response.headers["location"].endswith("message=updated")
-    assert repository.rewards[0].cost == 300
+    assert repository.rewards[0].cost == 20
     assert repository.rewards[0].is_active is True
 
 

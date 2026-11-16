@@ -17,9 +17,10 @@ KIND_OPTIONAL = "optional"
 TASK_KINDS = (KIND_DAILY, KIND_RANDOM, KIND_OPTIONAL)
 
 # Ограничения справочника — общие для навыка и админки.
+# Баллы целые и мелкие: ребёнок должен складывать их в уме.
 TITLE_MAX_LENGTH = 60
 TASK_MIN_POINTS = 1
-TASK_MAX_POINTS = 100
+TASK_MAX_POINTS = 10
 REWARD_MIN_COST = 1
 REWARD_MAX_COST = 100000
 

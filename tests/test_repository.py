@@ -155,11 +155,11 @@ def test_get_balance_reads_ledger_sum() -> None:
 
 
 def test_list_rewards_maps_rows() -> None:
-    database = FakeDatabase({SELECT_REWARDS: [[(1, "Мороженое", 350), (2, "Игра", 970)]]})
+    database = FakeDatabase({SELECT_REWARDS: [[(1, "Мороженое", 25), (2, "Игра", 70)]]})
 
     rewards = _repository(database).list_rewards()
 
-    assert rewards == [Reward(1, "Мороженое", 350), Reward(2, "Игра", 970)]
+    assert rewards == [Reward(1, "Мороженое", 25), Reward(2, "Игра", 70)]
 
 
 def test_get_goal_returns_none_when_not_set() -> None:
@@ -246,8 +246,8 @@ def test_reject_assignment_executes_query() -> None:
 def test_redeem_reward_spends_points_and_clears_goal() -> None:
     database = FakeDatabase(
         {
-            SELECT_REWARD: [[(1, "Мороженое", 350)]],
-            SELECT_BALANCE: [[(420,)]],
+            SELECT_REWARD: [[(1, "Мороженое", 25)]],
+            SELECT_BALANCE: [[(30,)]],
             INSERT_REDEMPTION: [[(77,)]],
         }
     )
@@ -255,9 +255,9 @@ def test_redeem_reward_spends_points_and_clears_goal() -> None:
     outcome = _repository(database).redeem_reward("user-1", 1)
 
     assert outcome.status == REDEEM_OK
-    assert outcome.balance == 70
+    assert outcome.balance == 5
     assert outcome.redemption_id == 77
-    assert _executed(database, INSERT_REDEEM_LEDGER) == [("user-1", -350, 77)]
+    assert _executed(database, INSERT_REDEEM_LEDGER) == [("user-1", -25, 77)]
     assert _executed(database, DELETE_GOAL) == [("user-1", 1)]
     assert database.locks == ["user-1"]
 
@@ -265,21 +265,21 @@ def test_redeem_reward_spends_points_and_clears_goal() -> None:
 def test_redeem_reward_reports_missing_points() -> None:
     database = FakeDatabase(
         {
-            SELECT_REWARD: [[(2, "Настольная игра", 970)]],
-            SELECT_BALANCE: [[(420,)]],
+            SELECT_REWARD: [[(2, "Настольная игра", 70)]],
+            SELECT_BALANCE: [[(30,)]],
         }
     )
 
     outcome = _repository(database).redeem_reward("user-1", 2)
 
     assert outcome.status == REDEEM_INSUFFICIENT
-    assert outcome.balance == 420
-    assert outcome.missing == 550
+    assert outcome.balance == 30
+    assert outcome.missing == 40
     assert _executed(database, INSERT_REDEMPTION) == []
 
 
 def test_redeem_reward_returns_not_found_for_unknown_reward() -> None:
-    database = FakeDatabase({SELECT_REWARD: [[]], SELECT_BALANCE: [[(420,)]]})
+    database = FakeDatabase({SELECT_REWARD: [[]], SELECT_BALANCE: [[(30,)]]})
 
     outcome = _repository(database).redeem_reward("user-1", 99)
 
@@ -341,7 +341,7 @@ def test_add_penalty_rejects_invalid_input(points: int, comment: str) -> None:
     result = _repository(database).add_penalty("user-1", points, comment)
 
     assert result.status == PENALTY_INVALID
-    assert result.max_points == 100
+    assert result.max_points == 10
     assert database.cursors[0].executed == []
 
 
@@ -572,30 +572,30 @@ def test_optional_tasks_are_not_penalized_in_sql() -> None:
 
 def test_list_all_rewards_includes_inactive() -> None:
     database = FakeDatabase(
-        {SELECT_ALL_REWARDS: [[(1, "Мороженое", 350, True), (2, "Кино", 500, False)]]}
+        {SELECT_ALL_REWARDS: [[(1, "Мороженое", 25, True), (2, "Кино", 40, False)]]}
     )
 
     assert _repository(database).list_all_rewards() == [
-        Reward(id=1, title="Мороженое", cost=350),
-        Reward(id=2, title="Кино", cost=500, is_active=False),
+        Reward(id=1, title="Мороженое", cost=25),
+        Reward(id=2, title="Кино", cost=40, is_active=False),
     ]
 
 
 def test_create_reward_normalizes_title_and_returns_row() -> None:
-    database = FakeDatabase({INSERT_REWARD: [[(3, "Кино", 500, True)]]})
+    database = FakeDatabase({INSERT_REWARD: [[(3, "Кино", 40, True)]]})
 
-    reward = _repository(database).create_reward("  Кино ", 500)
+    reward = _repository(database).create_reward("  Кино ", 40)
 
-    assert reward == Reward(id=3, title="Кино", cost=500)
-    assert _executed(database, INSERT_REWARD) == [("Кино", 500)]
+    assert reward == Reward(id=3, title="Кино", cost=40)
+    assert _executed(database, INSERT_REWARD) == [("Кино", 40)]
 
 
 def test_update_reward_returns_none_for_unknown_id() -> None:
     database = FakeDatabase({UPDATE_REWARD: [[]]})
 
-    updated = _repository(database).update_reward(9, title="Кино", cost=500, is_active=True)
+    updated = _repository(database).update_reward(9, title="Кино", cost=40, is_active=True)
 
     assert updated is None
-    assert _executed(database, UPDATE_REWARD) == [("Кино", 500, True, 9)]
+    assert _executed(database, UPDATE_REWARD) == [("Кино", 40, True, 9)]
 
 

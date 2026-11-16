@@ -59,10 +59,10 @@ def test_list_tasks_shows_titles_points_and_balance(alice_event, repository) -> 
 
     response = respond(request, repository, TODAY)
 
-    assert "Зарядка — 10 баллов" in response.text
-    assert "Прочитать 20 минут — 15 баллов" in response.text
-    assert "25 баллов" in response.text
-    assert "420 баллов" in response.text
+    assert "Зарядка — 2 балла" in response.text
+    assert "Прочитать 20 минут — 2 балла" in response.text
+    assert "4 балла" in response.text
+    assert "30 баллов" in response.text
     assert repository.plan_requests == [("user-1", TODAY)]
 
 
@@ -77,22 +77,22 @@ def test_my_points_without_goal_suggests_choosing_reward(alice_event, repository
 
     response = respond(request, repository, TODAY)
 
-    assert "420 баллов" in response.text
+    assert "30 баллов" in response.text
     assert "Цель пока не выбрана" in response.text
 
 
 def test_my_points_with_goal_shows_remaining(alice_event, repository) -> None:
-    repository.goal = make_reward(2, "Настольная игра", cost=970)
+    repository.goal = make_reward(2, "Настольная игра", cost=70)
     request = _request(alice_event, "сколько у меня баллов", intent=dialogue.INTENT_MY_POINTS)
 
     response = respond(request, repository, TODAY)
 
-    assert "420 баллов" in response.text
-    assert "550 баллов" in response.text
+    assert "30 баллов" in response.text
+    assert "40 баллов" in response.text
 
 
 def test_my_points_when_goal_is_affordable(alice_event, repository) -> None:
-    repository.goal = make_reward(1, "Мороженое", cost=350)
+    repository.goal = make_reward(1, "Мороженое", cost=25)
     request = _request(alice_event, "сколько у меня баллов", intent=dialogue.INTENT_MY_POINTS)
 
     response = respond(request, repository, TODAY)
@@ -102,30 +102,30 @@ def test_my_points_when_goal_is_affordable(alice_event, repository) -> None:
 
 def test_my_goal_without_goal_points_to_cheapest_reward(alice_event) -> None:
     repository = FakeSkillRepository(
-        rewards=[make_reward(1, "Наклейка", cost=200), make_reward(2, "Кино", cost=1100)],
-        balance=50,
+        rewards=[make_reward(1, "Наклейка", cost=10), make_reward(2, "Кино", cost=100)],
+        balance=5,
     )
     request = _request(alice_event, "какая у меня цель", intent=dialogue.INTENT_MY_GOAL)
 
     response = respond(request, repository, TODAY)
 
     assert "Наклейка" in response.text
-    assert "150 баллов" in response.text
+    assert "5 баллов" in response.text
 
 
 def test_my_goal_reports_remaining_points(alice_event, repository) -> None:
-    repository.goal = make_reward(2, "Настольная игра", cost=970)
+    repository.goal = make_reward(2, "Настольная игра", cost=70)
     request = _request(alice_event, "сколько осталось до цели", intent=dialogue.INTENT_MY_GOAL)
 
     response = respond(request, repository, TODAY)
 
     assert "Настольная игра" in response.text
-    assert "970 баллов" in response.text
-    assert "550 баллов" in response.text
+    assert "70 баллов" in response.text
+    assert "40 баллов" in response.text
 
 
 def test_my_goal_when_points_are_enough(alice_event, repository) -> None:
-    repository.goal = make_reward(1, "Мороженое", cost=350)
+    repository.goal = make_reward(1, "Мороженое", cost=25)
     request = _request(alice_event, "какая цель", intent=dialogue.INTENT_MY_GOAL)
 
     response = respond(request, repository, TODAY)
@@ -138,15 +138,15 @@ def test_list_rewards_marks_availability(alice_event, repository) -> None:
 
     response = respond(request, repository, TODAY)
 
-    assert "Мороженое — 350 баллов, можно брать" in response.text
-    assert "Настольная игра — 970 баллов, накопить ещё 550 баллов" in response.text
+    assert "Мороженое — 25 баллов, можно брать" in response.text
+    assert "Настольная игра — 70 баллов, накопить ещё 40 баллов" in response.text
 def test_task_done_moves_task_to_confirmation(alice_event, repository) -> None:
     request = _request(alice_event, "я выполнил зарядку", intent=dialogue.INTENT_TASK_DONE)
 
     response = respond(request, repository, TODAY)
 
     assert "ждёт подтверждения" in response.text
-    assert "10 баллов" in response.text
+    assert "2 балла" in response.text
     assert repository.claims == [1]
     assert repository.assignments[0].status == STATUS_AWAITING_CONFIRMATION
 
@@ -178,9 +178,9 @@ def test_want_reward_spends_points(alice_event, repository) -> None:
     response = respond(request, repository, TODAY)
 
     assert "Готово" in response.text
-    assert "70 баллов" in response.text
+    assert "5 баллов" in response.text
     assert repository.redemptions == [1]
-    assert repository.balance == 70
+    assert repository.balance == 5
 
 
 def test_want_unaffordable_reward_sets_goal(alice_event, repository) -> None:
@@ -188,7 +188,7 @@ def test_want_unaffordable_reward_sets_goal(alice_event, repository) -> None:
 
     response = respond(request, repository, TODAY)
 
-    assert "Пока не хватает 550 баллов" in response.text
+    assert "Пока не хватает 40 баллов" in response.text
     assert repository.goal_requests == [2]
     assert repository.goal is not None
     assert repository.redemptions == []
@@ -250,7 +250,7 @@ def test_voice_phrase_without_nlu_is_routed(alice_event, repository) -> None:
 
     response = respond(request, repository, TODAY)
 
-    assert "420 баллов" in response.text
+    assert "30 баллов" in response.text
 
 
 def test_add_penalty_creates_request_without_deduction(alice_event, repository) -> None:
@@ -267,7 +267,7 @@ def test_add_penalty_creates_request_without_deduction(alice_event, repository) 
     assert "ждёт подтверждения взрослого" in response.text
     assert len(repository.penalties) == 1
     assert repository.penalties[0].status == PENALTY_AWAITING
-    assert repository.balance == 420, "баллы не должны списываться до подтверждения"
+    assert repository.balance == 30, "баллы не должны списываться до подтверждения"
 
 
 def test_add_penalty_without_amount_explains_format(alice_event, repository) -> None:
@@ -280,7 +280,7 @@ def test_add_penalty_without_amount_explains_format(alice_event, repository) -> 
 
 
 def test_add_penalty_without_reason_asks_for_it(alice_event, repository) -> None:
-    request = _request(alice_event, "добавь штраф 15 баллов", intent=dialogue.INTENT_ADD_PENALTY)
+    request = _request(alice_event, "добавь штраф 10 баллов", intent=dialogue.INTENT_ADD_PENALTY)
 
     response = respond(request, repository, TODAY)
 
@@ -319,6 +319,15 @@ def test_add_penalty_rejects_amount_above_limit(alice_event, repository) -> None
     response = respond(request, repository, TODAY)
 
     assert "от 1 до 20 баллов" in response.text
+    assert repository.penalties == []
+
+
+def test_add_penalty_default_limit_is_daily_plan(alice_event, repository) -> None:
+    request = _request(alice_event, "штраф 11 баллов за шум", intent=dialogue.INTENT_ADD_PENALTY)
+
+    response = respond(request, repository, TODAY)
+
+    assert "от 1 до 10 баллов" in response.text
     assert repository.penalties == []
 
 

@@ -16,11 +16,13 @@ from alice_skill.repository import PostgresSkillRepository
 def build_app() -> tuple[object, AdminSettings]:
     """Собирает приложение и настройки запуска."""
     admin_settings = load_admin_settings()
-    repository = PostgresSkillRepository(load_settings())
+    settings = load_settings()
+    repository = PostgresSkillRepository(settings)
     app = create_app(
         repository,
         password=admin_settings.password,
         secret_key=admin_settings.secret_key,
+        penalty_max_points=settings.penalty_max_points,
     )
     return app, admin_settings
 

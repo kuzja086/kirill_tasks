@@ -131,6 +131,7 @@ def test_validate_task_input_normalizes_title_and_points() -> None:
         ("З" * 61, "daily", 10),
         ("Задача", "weekly", 10),
         ("Задача", "daily", 0),
+        ("Задача", "daily", 11),
         ("Задача", "daily", 101),
         ("Задача", "daily", "abc"),
         ("Задача", "daily", "2.5"),
@@ -143,13 +144,13 @@ def test_validate_task_input_rejects_bad_values(title: str, kind: str, points: o
 
 
 def test_validate_reward_input_normalizes_title() -> None:
-    assert validate_reward_input("  Мороженое ", "350") == ("Мороженое", 350)
+    assert validate_reward_input("  Мороженое ", "25") == ("Мороженое", 25)
 
 
 @pytest.mark.parametrize(
     ("title", "cost"),
     [
-        ("", 350),
+        ("", 25),
         ("Мороженое", 0),
         ("Мороженое", -5),
         ("Мороженое", 10.5),
