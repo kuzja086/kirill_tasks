@@ -52,3 +52,17 @@ def test_daily_plan_starts_with_daily_tasks() -> None:
     assert [task.id for task in scheduled[: len(DAILY)]] == [task.id for task in DAILY]
     assert len(scheduled) == len(DAILY) + 2
     assert all(task.kind == "random" for task in scheduled[len(DAILY) :])
+
+
+def test_optional_tasks_never_get_into_daily_plan() -> None:
+    optional = make_task(99, "Полить цветы", kind="optional", points=5)
+
+    scheduled = build_daily_plan(
+        [optional, *DAILY],
+        [optional, *POOL],
+        seed="user-1:2026-11-15",
+        random_count=2,
+    )
+
+    assert optional.id not in {task.id for task in scheduled}
+    assert len(scheduled) == len(DAILY) + 2

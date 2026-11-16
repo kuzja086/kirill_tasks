@@ -14,14 +14,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from admin.labels import penalty_status_label, reason_label, source_label
+from admin.labels import kind_label, penalty_status_label, reason_label, source_label
 from alice_skill.models import (
+    KIND_DAILY,
     PENALTY_AWAITING,
     PENALTY_CREATED,
     PENALTY_LIMIT_EXCEEDED,
     SOURCE_ADMIN,
+    TASK_KINDS,
 )
-from alice_skill.repository import SkillRepository
+from alice_skill.repository import DuplicateTitleError, SkillRepository
 from alice_skill.text import format_points
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -49,6 +51,7 @@ def create_app(
     templates.env.filters["reason"] = reason_label
     templates.env.filters["penalty_status"] = penalty_status_label
     templates.env.filters["source"] = source_label
+    templates.env.filters["kind"] = kind_label
 
     def guard(request: Request) -> RedirectResponse | None:
         if not request.session.get("authenticated"):
@@ -216,6 +219,134 @@ def create_app(
                 "entries": repository.list_ledger(user_id, limit=100) if user_id else [],
             },
         )
+
+    # --- справочник задач и наград ---
+
+    @app.get("/tasks", response_class=HTMLResponse)
+    def tasks(request: Request, message: str = "", error: str = "") -> HTMLResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        return render(
+            request,
+            "tasks.html",
+            {
+                "tasks": repository.list_tasks(),
+                "kinds": [(kind, kind_label(kind)) for kind in TASK_KINDS],
+                "message": message,
+                "error": error,
+            },
+        )
+
+    @app.post("/tasks")
+    def create_task(
+        request: Request,
+        title: str = Form(""),
+        kind: str = Form(KIND_DAILY),
+        points: str = Form(""),
+    ) -> RedirectResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        try:
+            repository.create_task(title, kind, int(points))
+        except DuplicateTitleError:
+            return RedirectResponse("/tasks?error=duplicate", status_code=303)
+        except ValueError:
+            return RedirectResponse("/tasks?error=invalid", status_code=303)
+        return RedirectResponse("/tasks?message=created", status_code=303)
+
+    @app.post("/tasks/{task_id}")
+    def update_task(
+        request: Request,
+        task_id: int,
+        title: str = Form(""),
+        kind: str = Form(KIND_DAILY),
+        points: str = Form(""),
+        is_active: bool = Form(False),
+    ) -> RedirectResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        try:
+            updated = repository.update_task(
+                task_id,
+                title=title,
+                kind=kind,
+                points=int(points),
+                is_active=is_active,
+            )
+        except DuplicateTitleError:
+            return RedirectResponse("/tasks?error=duplicate", status_code=303)
+        except ValueError:
+            return RedirectResponse("/tasks?error=invalid", status_code=303)
+        if updated is None:
+            return RedirectResponse("/tasks?error=missing", status_code=303)
+        return RedirectResponse("/tasks?message=updated", status_code=303)
+
+    @app.get("/rewards", response_class=HTMLResponse)
+    def rewards(request: Request, message: str = "", error: str = "") -> HTMLResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        return render(
+            request,
+            "rewards.html",
+            {
+                "rewards": repository.list_all_rewards(),
+                "message": message,
+                "error": error,
+            },
+        )
+
+    @app.post("/rewards")
+    def create_reward(
+        request: Request,
+        title: str = Form(""),
+        cost: str = Form(""),
+    ) -> RedirectResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        try:
+            repository.create_reward(title, int(cost))
+        except DuplicateTitleError:
+            return RedirectResponse("/rewards?error=duplicate", status_code=303)
+        except ValueError:
+            return RedirectResponse("/rewards?error=invalid", status_code=303)
+        return RedirectResponse("/rewards?message=created", status_code=303)
+
+    @app.post("/rewards/{reward_id}")
+    def update_reward(
+        request: Request,
+        reward_id: int,
+        title: str = Form(""),
+        cost: str = Form(""),
+        is_active: bool = Form(False),
+    ) -> RedirectResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        try:
+            updated = repository.update_reward(
+                reward_id,
+                title=title,
+                cost=int(cost),
+                is_active=is_active,
+            )
+        except DuplicateTitleError:
+            return RedirectResponse("/rewards?error=duplicate", status_code=303)
+        except ValueError:
+            return RedirectResponse("/rewards?error=invalid", status_code=303)
+        if updated is None:
+            return RedirectResponse("/rewards?error=missing", status_code=303)
+        return RedirectResponse("/rewards?message=updated", status_code=303)
 
     return app
 

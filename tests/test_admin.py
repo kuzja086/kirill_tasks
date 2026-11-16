@@ -13,7 +13,7 @@ from alice_skill.models import (
     STATUS_DONE,
     STATUS_MISSED,
 )
-from factories import FakeSkillRepository, make_assignment
+from factories import FakeSkillRepository, make_assignment, make_reward, make_task
 
 PASSWORD = "test-password"
 
@@ -181,3 +181,143 @@ def test_healthz() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# --- справочник задач и наград ---
+
+
+def test_tasks_page_lists_tasks_with_kind() -> None:
+    repository = FakeSkillRepository(
+        tasks=[make_task(1, "Зарядка", points=10), make_task(2, "Полить цветы", kind="optional", points=5)]
+    )
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/tasks")
+
+    assert page.status_code == 200
+    assert "Зарядка" in page.text
+    assert "Полить цветы" in page.text
+    assert "дополнительная" in page.text
+
+
+def test_task_can_be_created_from_admin() -> None:
+    repository = FakeSkillRepository()
+    client = _client(repository)
+    _login(client)
+
+    response = client.post(
+        "/tasks",
+        data={"title": "Полить цветы", "kind": "optional", "points": "5"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=created")
+    assert len(repository.tasks) == 1
+    assert repository.tasks[0].title == "Полить цветы"
+    assert repository.tasks[0].kind == "optional"
+    assert repository.tasks[0].points == 5
+
+
+def test_task_with_duplicate_title_is_rejected() -> None:
+    repository = FakeSkillRepository(tasks=[make_task(1, "Зарядка")])
+    client = _client(repository)
+    _login(client)
+
+    response = client.post(
+        "/tasks",
+        data={"title": "зарядка", "kind": "daily", "points": "10"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("error=duplicate")
+    assert len(repository.tasks) == 1
+
+
+def test_task_with_non_integer_points_is_rejected() -> None:
+    repository = FakeSkillRepository()
+    client = _client(repository)
+    _login(client)
+
+    response = client.post(
+        "/tasks",
+        data={"title": "Полить цветы", "kind": "daily", "points": "2.5"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("error=invalid")
+    assert repository.tasks == []
+
+
+def test_task_can_be_edited_and_disabled() -> None:
+    repository = FakeSkillRepository(tasks=[make_task(1, "Зарядка", points=10)])
+    client = _client(repository)
+    _login(client)
+
+    response = client.post(
+        "/tasks/1",
+        data={"title": "Зарядка утром", "kind": "daily", "points": "15"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=updated")
+    assert repository.tasks[0].title == "Зарядка утром"
+    assert repository.tasks[0].points == 15
+    assert repository.tasks[0].is_active is False
+
+
+def test_editing_unknown_task_reports_missing() -> None:
+    client = _client(FakeSkillRepository())
+    _login(client)
+
+    response = client.post(
+        "/tasks/99",
+        data={"title": "Зарядка", "kind": "daily", "points": "10"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("error=missing")
+
+
+def test_reward_cost_can_be_edited() -> None:
+    repository = FakeSkillRepository(rewards=[make_reward(1, "Мороженое", cost=350)])
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/rewards")
+    assert "Мороженое" in page.text
+
+    response = client.post(
+        "/rewards/1",
+        data={"title": "Мороженое", "cost": "300", "is_active": "true"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=updated")
+    assert repository.rewards[0].cost == 300
+    assert repository.rewards[0].is_active is True
+
+
+def test_optional_assignment_is_labelled_and_not_penalized() -> None:
+    repository = FakeSkillRepository(
+        tasks=[make_task(2, "Полить цветы", kind="optional", points=5)],
+        balance=10,
+    )
+    repository.claim_optional_task("user-1", dt.date(2026, 11, 15), repository.tasks[0])
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/assignments")
+    assert "дополнительная" in page.text
+
+    client.post("/assignments/1/reject", follow_redirects=False)
+
+    assert repository.assignments[0].status == STATUS_MISSED
+    assert repository.balance == 10, "за дополнительную задачу баллы не списываются"
+    assert repository.ledger == []

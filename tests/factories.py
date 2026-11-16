@@ -7,6 +7,9 @@ from dataclasses import replace
 from typing import Any
 
 from alice_skill.models import (
+    CLAIM_CREATED,
+    KIND_DAILY,
+    KIND_OPTIONAL,
     PENALTY_APPLIED,
     PENALTY_AWAITING,
     PENALTY_CREATED,
@@ -28,11 +31,21 @@ from alice_skill.models import (
     RedeemOutcome,
     Reward,
     Task,
+    validate_reward_input,
+    validate_task_input,
 )
+from alice_skill.repository import DuplicateTitleError
 
 
-def make_task(task_id: int, title: str, *, kind: str = "daily", points: int = 10) -> Task:
-    return Task(id=task_id, title=title, kind=kind, points=points)
+def make_task(
+    task_id: int,
+    title: str,
+    *,
+    kind: str = KIND_DAILY,
+    points: int = 10,
+    is_active: bool = True,
+) -> Task:
+    return Task(id=task_id, title=title, kind=kind, points=points, is_active=is_active)
 
 
 def make_assignment(
@@ -41,8 +54,15 @@ def make_assignment(
     *,
     points: int = 10,
     status: str = STATUS_PENDING,
+    kind: str = KIND_DAILY,
 ) -> Assignment:
-    return Assignment(id=assignment_id, title=title, points=points, status=status)
+    return Assignment(
+        id=assignment_id,
+        title=title,
+        points=points,
+        status=status,
+        kind=kind,
+    )
 
 
 def make_reward(reward_id: int, title: str, *, cost: int = 100) -> Reward:
@@ -58,16 +78,19 @@ class FakeSkillRepository:
         rewards: list[Reward] | None = None,
         balance: int = 0,
         *,
+        tasks: list[Task] | None = None,
         user_id: str = "user-1",
         max_points: int = 100,
         daily_limit: int = 5,
     ) -> None:
         self.assignments = list(assignments or [])
         self.rewards = list(rewards or [])
+        self.tasks = list(tasks or [])
         self.balance = balance
         self.goal: Reward | None = None
         self.plan_requests: list[tuple[str, Any]] = []
         self.claims: list[int] = []
+        self.optional_claims: list[int] = []
         self.redemptions: list[int] = []
         self.goal_requests: list[int] = []
         self.user_id = user_id
@@ -76,16 +99,68 @@ class FakeSkillRepository:
         self.penalties: list[Penalty] = []
         self.ledger: list[LedgerEntry] = []
         self._next_penalty_id = 1
+        self._next_task_id = max((task.id for task in self.tasks), default=0) + 1
+        self._next_reward_id = max((reward.id for reward in self.rewards), default=0) + 1
+        self._next_assignment_id = max(
+            (assignment.id for assignment in self.assignments), default=0
+        ) + 1
+        # Заявки на дополнительные задачи: task_id -> assignment_id.
+        self._optional_assignment_ids: dict[int, int] = {}
 
     def ensure_daily_plan(self, user_id: str, plan_date: Any) -> list[Assignment]:
         self.plan_requests.append((user_id, plan_date))
-        return list(self.assignments)
+        # Дополнительные задачи в план дня не входят: их ребёнок берёт сам.
+        return [
+            assignment
+            for assignment in self.assignments
+            if assignment.kind != KIND_OPTIONAL
+        ]
 
     def get_balance(self, user_id: str) -> int:
         return self.balance
 
     def list_rewards(self) -> list[Reward]:
+        active = [reward for reward in self.rewards if reward.is_active]
+        return sorted(active, key=lambda reward: (reward.cost, reward.id))
+
+    def list_all_rewards(self) -> list[Reward]:
         return sorted(self.rewards, key=lambda reward: (reward.cost, reward.id))
+
+    def create_reward(self, title: str, cost: int) -> Reward:
+        cleaned_title, cleaned_cost = validate_reward_input(title, cost)
+        if any(reward.title.lower() == cleaned_title.lower() for reward in self.rewards):
+            raise DuplicateTitleError(f"Награда «{cleaned_title}» уже есть")
+        reward = Reward(id=self._next_reward_id, title=cleaned_title, cost=cleaned_cost)
+        self._next_reward_id += 1
+        self.rewards.append(reward)
+        return reward
+
+    def update_reward(
+        self,
+        reward_id: int,
+        *,
+        title: str,
+        cost: int,
+        is_active: bool,
+    ) -> Reward | None:
+        cleaned_title, cleaned_cost = validate_reward_input(title, cost)
+        if any(
+            reward.id != reward_id and reward.title.lower() == cleaned_title.lower()
+            for reward in self.rewards
+        ):
+            raise DuplicateTitleError(f"Награда «{cleaned_title}» уже есть")
+        for index, reward in enumerate(self.rewards):
+            if reward.id != reward_id:
+                continue
+            updated = replace(
+                reward,
+                title=cleaned_title,
+                cost=cleaned_cost,
+                is_active=is_active,
+            )
+            self.rewards[index] = updated
+            return updated
+        return None
 
     def get_goal(self, user_id: str) -> Reward | None:
         return self.goal
@@ -127,6 +202,87 @@ class FakeSkillRepository:
             return updated.status
         return None
 
+    # --- справочник задач ---
+
+    def list_tasks(self) -> list[Task]:
+        return list(self.tasks)
+
+    def list_optional_tasks(self) -> list[Task]:
+        return [
+            task
+            for task in self.tasks
+            if task.kind == KIND_OPTIONAL and task.is_active
+        ]
+
+    def create_task(self, title: str, kind: str, points: int) -> Task:
+        cleaned_title, cleaned_kind, cleaned_points = validate_task_input(title, kind, points)
+        if any(
+            task.kind == cleaned_kind and task.title.lower() == cleaned_title.lower()
+            for task in self.tasks
+        ):
+            raise DuplicateTitleError(f"Задача «{cleaned_title}» уже есть")
+        task = Task(
+            id=self._next_task_id,
+            title=cleaned_title,
+            kind=cleaned_kind,
+            points=cleaned_points,
+        )
+        self._next_task_id += 1
+        self.tasks.append(task)
+        return task
+
+    def update_task(
+        self,
+        task_id: int,
+        *,
+        title: str,
+        kind: str,
+        points: int,
+        is_active: bool,
+    ) -> Task | None:
+        cleaned_title, cleaned_kind, cleaned_points = validate_task_input(title, kind, points)
+        if any(
+            task.id != task_id
+            and task.kind == cleaned_kind
+            and task.title.lower() == cleaned_title.lower()
+            for task in self.tasks
+        ):
+            raise DuplicateTitleError(f"Задача «{cleaned_title}» уже есть")
+        for index, task in enumerate(self.tasks):
+            if task.id != task_id:
+                continue
+            updated = replace(
+                task,
+                title=cleaned_title,
+                kind=cleaned_kind,
+                points=cleaned_points,
+                is_active=is_active,
+            )
+            self.tasks[index] = updated
+            return updated
+        return None
+
+    def claim_optional_task(self, user_id: str, plan_date: Any, task: Task) -> str | None:
+        self.optional_claims.append(task.id)
+        assignment_id = self._optional_assignment_ids.get(task.id)
+        if assignment_id is not None:
+            existing = next(
+                assignment for assignment in self.assignments if assignment.id == assignment_id
+            )
+            return existing.status
+
+        assignment = Assignment(
+            id=self._next_assignment_id,
+            title=task.title,
+            points=task.points,
+            status=STATUS_AWAITING_CONFIRMATION,
+            kind=KIND_OPTIONAL,
+        )
+        self._next_assignment_id += 1
+        self.assignments.append(assignment)
+        self._optional_assignment_ids[task.id] = assignment.id
+        return CLAIM_CREATED
+
     # --- подтверждение задач (админка) ---
 
     def confirm_assignment(self, assignment_id: int) -> None:
@@ -149,6 +305,9 @@ class FakeSkillRepository:
             if assignment.id != assignment_id or assignment.status != STATUS_AWAITING_CONFIRMATION:
                 continue
             self.assignments[index] = replace(assignment, status=STATUS_MISSED)
+            if assignment.kind == KIND_OPTIONAL:
+                # Дополнительные задачи не штрафуются: баллы не списываются.
+                return
             self.balance -= assignment.points
             self.ledger.append(
                 LedgerEntry(
@@ -251,6 +410,7 @@ class FakeSkillRepository:
                 plan_date=dt.date(2026, 11, 15),
                 title=assignment.title,
                 points=assignment.points,
+                kind=assignment.kind,
             )
             for assignment in self.assignments
             if assignment.status == STATUS_AWAITING_CONFIRMATION

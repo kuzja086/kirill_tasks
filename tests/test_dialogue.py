@@ -14,7 +14,7 @@ from alice_skill.models import (
     STATUS_DONE,
     AliceRequest,
 )
-from factories import FakeSkillRepository, make_assignment, make_reward
+from factories import FakeSkillRepository, make_assignment, make_reward, make_task
 
 TODAY = dt.date(2026, 11, 15)
 
@@ -338,5 +338,84 @@ def test_every_intent_creates_daily_plan(alice_event, repository, intent, expect
 
     assert expected_text in response.text
     assert repository.plan_requests == [("user-1", TODAY)]
+
+
+# --- дополнительные задачи (kind = 'optional') ---
+
+OPTIONAL_TASKS = [make_task(21, "Полить цветы", kind="optional", points=5)]
+
+
+def test_list_tasks_mentions_optional_tasks_without_penalty(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[make_assignment(1, "Зарядка", points=10)],
+        tasks=OPTIONAL_TASKS,
+        balance=10,
+    )
+    request = _request(alice_event, "какие задачи на сегодня", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "Если хочешь, можно ещё" in response.text
+    assert "Полить цветы — 5 баллов" in response.text
+    assert "не списываются" in response.text
+
+
+def test_list_tasks_without_plan_still_offers_optional_tasks(alice_event) -> None:
+    repository = FakeSkillRepository(tasks=OPTIONAL_TASKS)
+    request = _request(alice_event, "какие задачи на сегодня", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "обязательных задач нет" in response.text
+    assert "Полить цветы" in response.text
+
+
+def test_task_done_for_optional_task_creates_request_without_penalty(alice_event) -> None:
+    repository = FakeSkillRepository(tasks=OPTIONAL_TASKS, balance=10)
+    request = _request(alice_event, "я полил цветы", intent=dialogue.INTENT_TASK_DONE)
+
+    response = respond(request, repository, TODAY)
+
+    assert "дополнительная задача" in response.text
+    assert "баллы не спишутся" in response.text
+    assert repository.claims == []
+    assert repository.optional_claims == [21]
+    assert repository.assignments[0].status == STATUS_AWAITING_CONFIRMATION
+    assert repository.assignments[0].kind == "optional"
+    assert repository.balance == 10
+
+
+def test_optional_task_is_not_claimed_twice(alice_event) -> None:
+    repository = FakeSkillRepository(tasks=OPTIONAL_TASKS)
+    request = _request(alice_event, "я полил цветы", intent=dialogue.INTENT_TASK_DONE)
+    respond(request, repository, TODAY)
+
+    response = respond(request, repository, TODAY)
+
+    assert "уже ждёт подтверждения" in response.text
+    assert len(repository.assignments) == 1
+
+
+def test_unknown_task_message_hints_optional_tasks(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[make_assignment(1, "Зарядка")],
+        tasks=OPTIONAL_TASKS,
+    )
+    request = _request(alice_event, "я выполнил уборку снега", intent=dialogue.INTENT_TASK_DONE)
+
+    response = respond(request, repository, TODAY)
+
+    assert "Не нашла такую задачу" in response.text
+    assert "Можно взять дополнительно: Полить цветы" in response.text
+
+
+def test_rejecting_optional_task_does_not_deduct_points() -> None:
+    repository = FakeSkillRepository(tasks=OPTIONAL_TASKS, balance=10)
+    repository.claim_optional_task("user-1", TODAY, OPTIONAL_TASKS[0])
+
+    repository.reject_assignment(1)
+
+    assert repository.balance == 10
+    assert repository.ledger == []
 
 

@@ -22,6 +22,12 @@ SOURCE_LABELS = {
     "admin": "админка",
 }
 
+KIND_LABELS = {
+    "daily": "ежедневная",
+    "random": "случайная",
+    "optional": "дополнительная",
+}
+
 
 def reason_label(reason: str) -> str:
     return REASON_LABELS.get(reason, reason)
@@ -33,3 +39,7 @@ def penalty_status_label(status: str) -> str:
 
 def source_label(source: str) -> str:
     return SOURCE_LABELS.get(source, source)
+
+
+def kind_label(kind: str) -> str:
+    return KIND_LABELS.get(kind, kind)

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from alice_skill.models import AliceRequest, AliceResponse, make_button
+import pytest
+
+from alice_skill.models import (
+    AliceRequest,
+    AliceResponse,
+    make_button,
+    validate_reward_input,
+    validate_task_input,
+)
 
 
 def test_from_event_reads_all_fields(alice_event) -> None:
@@ -105,3 +113,49 @@ def test_make_button_keeps_payload() -> None:
         "hide": False,
         "payload": {"intent": "remember_name"},
     }
+
+
+def test_validate_task_input_normalizes_title_and_points() -> None:
+    assert validate_task_input("  Помыть   посуду ", "daily", "10") == (
+        "Помыть посуду",
+        "daily",
+        10,
+    )
+
+
+@pytest.mark.parametrize(
+    ("title", "kind", "points"),
+    [
+        ("", "daily", 10),
+        ("   ", "daily", 10),
+        ("З" * 61, "daily", 10),
+        ("Задача", "weekly", 10),
+        ("Задача", "daily", 0),
+        ("Задача", "daily", 101),
+        ("Задача", "daily", "abc"),
+        ("Задача", "daily", "2.5"),
+        ("Задача", "daily", 2.5),
+    ],
+)
+def test_validate_task_input_rejects_bad_values(title: str, kind: str, points: object) -> None:
+    with pytest.raises(ValueError):
+        validate_task_input(title, kind, points)
+
+
+def test_validate_reward_input_normalizes_title() -> None:
+    assert validate_reward_input("  Мороженое ", "350") == ("Мороженое", 350)
+
+
+@pytest.mark.parametrize(
+    ("title", "cost"),
+    [
+        ("", 350),
+        ("Мороженое", 0),
+        ("Мороженое", -5),
+        ("Мороженое", 10.5),
+        ("Мороженое", "много"),
+    ],
+)
+def test_validate_reward_input_rejects_bad_values(title: str, cost: object) -> None:
+    with pytest.raises(ValueError):
+        validate_reward_input(title, cost)

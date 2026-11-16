@@ -12,6 +12,7 @@ import pytest
 from alice_skill import economy
 from alice_skill.config import Settings
 from alice_skill.models import (
+    CLAIM_CREATED,
     PENALTY_CREATED,
     PENALTY_INVALID,
     PENALTY_LIMIT_EXCEEDED,
@@ -23,6 +24,7 @@ from alice_skill.models import (
     Penalty,
     PendingAssignment,
     Reward,
+    Task,
 )
 from alice_skill.repository import (
     APPLY_MISSED_PENALTIES,
@@ -31,20 +33,28 @@ from alice_skill.repository import (
     CONFIRM_PENALTY,
     COUNT_RECENT_PENALTIES,
     DELETE_GOAL,
+    DuplicateTitleError,
     INSERT_ASSIGNMENT,
+    INSERT_OPTIONAL_ASSIGNMENT,
     INSERT_PENALTY,
     INSERT_PENALTY_LEDGER,
     INSERT_REDEEM_LEDGER,
     INSERT_REDEMPTION,
+    INSERT_REWARD,
+    INSERT_TASK,
     LINK_PENALTY_LEDGER,
     PostgresSkillRepository,
     REJECT_ASSIGNMENT,
     REJECT_PENALTY,
+    SELECT_ALL_REWARDS,
+    SELECT_ALL_TASKS,
     SELECT_ASSIGNMENT_STATUS,
+    SELECT_ASSIGNMENT_STATUS_BY_TASK,
     SELECT_BALANCE,
     SELECT_DAILY_TASKS,
     SELECT_GOAL,
     SELECT_LEDGER,
+    SELECT_OPTIONAL_TASKS,
     SELECT_PENALTIES,
     SELECT_PENDING_ASSIGNMENTS,
     SELECT_PLAN,
@@ -52,6 +62,8 @@ from alice_skill.repository import (
     SELECT_REWARD,
     SELECT_REWARDS,
     SELECT_USERS,
+    UPDATE_REWARD,
+    UPDATE_TASK,
     UPSERT_GOAL,
 )
 
@@ -61,13 +73,21 @@ TODAY = dt.date(2026, 11, 15)
 class FakeCursor:
     """Курсор с заранее заданными ответами: `{sql: [ответ, ответ, ...]}`."""
 
-    def __init__(self, script: dict[str, list[list[tuple[Any, ...]]]]) -> None:
+    def __init__(
+        self,
+        script: dict[str, list[list[tuple[Any, ...]]]],
+        errors: dict[str, BaseException] | None = None,
+    ) -> None:
         self._script = {key: list(values) for key, values in script.items()}
+        self._errors = errors or {}
         self.executed: list[tuple[str, tuple[Any, ...] | None]] = []
         self._rows: list[tuple[Any, ...]] = []
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
         self.executed.append((sql, params))
+        error = self._errors.get(sql)
+        if error is not None:
+            raise error
         queue = self._script.get(sql, [])
         self._rows = queue.pop(0) if queue else []
 
@@ -86,8 +106,10 @@ class FakeDatabase:
         script: dict[str, list[list[tuple[Any, ...]]]] | None = None,
         *,
         fail_times: int = 0,
+        errors: dict[str, BaseException] | None = None,
     ) -> None:
         self._script = script or {}
+        self._errors = errors or {}
         self.fail_times = fail_times
         self.cursors: list[FakeCursor] = []
         self.locks: list[str | None] = []
@@ -99,7 +121,7 @@ class FakeDatabase:
         if self.fail_times > 0:
             self.fail_times -= 1
             raise psycopg2.OperationalError("server closed the connection unexpectedly")
-        cursor = FakeCursor(self._script)
+        cursor = FakeCursor(self._script, self._errors)
         self.cursors.append(cursor)
         yield cursor
 
@@ -158,7 +180,7 @@ def test_ensure_daily_plan_creates_daily_and_random_tasks() -> None:
     database = FakeDatabase(
         {
             APPLY_MISSED_PENALTIES: [[]],
-            SELECT_PLAN: [[], [(11, "Зарядка", 10, "pending")]],
+            SELECT_PLAN: [[], [(11, "Зарядка", "daily", 10, "pending")]],
             SELECT_DAILY_TASKS: [[(1, "Зарядка", "daily", 10)]],
             SELECT_RANDOM_TASKS: [
                 [(2, "Погулять", "random", 15), (3, "Поделка", "random", 15)]
@@ -168,7 +190,9 @@ def test_ensure_daily_plan_creates_daily_and_random_tasks() -> None:
 
     assignments = _repository(database).ensure_daily_plan("user-1", TODAY)
 
-    assert assignments == [Assignment(id=11, title="Зарядка", points=10, status="pending")]
+    assert assignments == [
+        Assignment(id=11, title="Зарядка", points=10, status="pending", kind="daily")
+    ]
     inserts = _executed(database, INSERT_ASSIGNMENT)
     assert len(inserts) == 1 + economy.RANDOM_TASKS_PER_DAY
     assert inserts[0] == ("user-1", TODAY, 1, "Зарядка", "daily", 10)
@@ -179,7 +203,7 @@ def test_ensure_daily_plan_applies_penalties_first() -> None:
     database = FakeDatabase(
         {
             APPLY_MISSED_PENALTIES: [[]],
-            SELECT_PLAN: [[(11, "Зарядка", 10, "missed")]],
+            SELECT_PLAN: [[(11, "Зарядка", "daily", 10, "missed")]],
         }
     )
 
@@ -410,13 +434,20 @@ def test_list_ledger_maps_rows() -> None:
 
 def test_list_pending_assignments_maps_rows() -> None:
     database = FakeDatabase(
-        {SELECT_PENDING_ASSIGNMENTS: [[(3, "user-1", TODAY, "Зарядка", 10)]]}
+        {SELECT_PENDING_ASSIGNMENTS: [[(3, "user-1", TODAY, "Зарядка", 10, "optional")]]}
     )
 
     assignments = _repository(database).list_pending_assignments()
 
     assert assignments == [
-        PendingAssignment(id=3, user_id="user-1", plan_date=TODAY, title="Зарядка", points=10)
+        PendingAssignment(
+            id=3,
+            user_id="user-1",
+            plan_date=TODAY,
+            title="Зарядка",
+            points=10,
+            kind="optional",
+        )
     ]
 
 
@@ -424,5 +455,147 @@ def test_list_users_returns_identifiers() -> None:
     database = FakeDatabase({SELECT_USERS: [[("kid-1",), ("kid-2",)]]})
 
     assert _repository(database).list_users() == ["kid-1", "kid-2"]
+
+
+# --- справочник задач и наград ---
+
+
+def test_list_tasks_includes_inactive_tasks() -> None:
+    database = FakeDatabase(
+        {
+            SELECT_ALL_TASKS: [
+                [
+                    (1, "Зарядка", "daily", 10, True),
+                    (2, "Помыть посуду", "optional", 5, False),
+                ]
+            ]
+        }
+    )
+
+    tasks = _repository(database).list_tasks()
+
+    assert tasks == [
+        Task(id=1, title="Зарядка", kind="daily", points=10),
+        Task(id=2, title="Помыть посуду", kind="optional", points=5, is_active=False),
+    ]
+
+
+def test_list_optional_tasks_uses_optional_query() -> None:
+    database = FakeDatabase({SELECT_OPTIONAL_TASKS: [[(7, "Полить цветы", "optional", 5)]]})
+
+    tasks = _repository(database).list_optional_tasks()
+
+    assert tasks == [Task(id=7, title="Полить цветы", kind="optional", points=5)]
+    assert _executed(database, SELECT_OPTIONAL_TASKS) == [None]
+
+
+def test_create_task_normalizes_title_and_returns_row() -> None:
+    database = FakeDatabase({INSERT_TASK: [[(5, "Помыть посуду", "daily", 10, True)]]})
+
+    task = _repository(database).create_task("  Помыть   посуду ", "daily", 10)
+
+    assert task == Task(id=5, title="Помыть посуду", kind="daily", points=10)
+    assert _executed(database, INSERT_TASK) == [("Помыть посуду", "daily", 10)]
+
+
+def test_create_task_rejects_duplicate_title() -> None:
+    database = FakeDatabase(errors={INSERT_TASK: psycopg2.errors.UniqueViolation("dup")})
+
+    with pytest.raises(DuplicateTitleError):
+        _repository(database).create_task("Зарядка", "daily", 10)
+
+
+@pytest.mark.parametrize(
+    ("title", "kind", "points"),
+    [
+        ("", "daily", 10),
+        ("Задача", "weekly", 10),
+        ("Задача", "daily", 0),
+        ("Задача", "daily", 101),
+    ],
+)
+def test_create_task_validates_input(title: str, kind: str, points: int) -> None:
+    database = FakeDatabase()
+
+    with pytest.raises(ValueError):
+        _repository(database).create_task(title, kind, points)
+
+    assert database.cursors == [], "невалидные данные не должны доходить до SQL"
+
+
+def test_update_task_returns_none_for_unknown_id() -> None:
+    database = FakeDatabase({UPDATE_TASK: [[]]})
+
+    updated = _repository(database).update_task(
+        99,
+        title="Зарядка",
+        kind="daily",
+        points=10,
+        is_active=False,
+    )
+
+    assert updated is None
+    assert _executed(database, UPDATE_TASK) == [("Зарядка", "daily", 10, False, 99)]
+
+
+def test_claim_optional_task_creates_assignment() -> None:
+    database = FakeDatabase({INSERT_OPTIONAL_ASSIGNMENT: [[("awaiting_confirmation",)]]})
+    task = Task(id=7, title="Полить цветы", kind="optional", points=5)
+
+    status = _repository(database).claim_optional_task("user-1", TODAY, task)
+
+    assert status == CLAIM_CREATED
+    assert _executed(database, INSERT_OPTIONAL_ASSIGNMENT) == [
+        ("user-1", TODAY, 7, "Полить цветы", 5)
+    ]
+
+
+def test_claim_optional_task_returns_existing_status() -> None:
+    database = FakeDatabase(
+        {
+            INSERT_OPTIONAL_ASSIGNMENT: [[]],
+            SELECT_ASSIGNMENT_STATUS_BY_TASK: [[("done",)]],
+        }
+    )
+    task = Task(id=7, title="Полить цветы", kind="optional", points=5)
+
+    assert _repository(database).claim_optional_task("user-1", TODAY, task) == "done"
+
+
+def test_optional_tasks_are_not_penalized_in_sql() -> None:
+    # Дополнительные задачи не штрафуются и не попадают в план дня: условия
+    # живут в самом SQL, чтобы их нельзя было обойти вызовом репозитория.
+    assert "kind <> 'optional'" in REJECT_ASSIGNMENT
+    assert "kind <> 'optional'" in APPLY_MISSED_PENALTIES
+    assert "kind <> 'optional'" in SELECT_PLAN
+
+
+def test_list_all_rewards_includes_inactive() -> None:
+    database = FakeDatabase(
+        {SELECT_ALL_REWARDS: [[(1, "Мороженое", 350, True), (2, "Кино", 500, False)]]}
+    )
+
+    assert _repository(database).list_all_rewards() == [
+        Reward(id=1, title="Мороженое", cost=350),
+        Reward(id=2, title="Кино", cost=500, is_active=False),
+    ]
+
+
+def test_create_reward_normalizes_title_and_returns_row() -> None:
+    database = FakeDatabase({INSERT_REWARD: [[(3, "Кино", 500, True)]]})
+
+    reward = _repository(database).create_reward("  Кино ", 500)
+
+    assert reward == Reward(id=3, title="Кино", cost=500)
+    assert _executed(database, INSERT_REWARD) == [("Кино", 500)]
+
+
+def test_update_reward_returns_none_for_unknown_id() -> None:
+    database = FakeDatabase({UPDATE_REWARD: [[]]})
+
+    updated = _repository(database).update_reward(9, title="Кино", cost=500, is_active=True)
+
+    assert updated is None
+    assert _executed(database, UPDATE_REWARD) == [("Кино", 500, True, 9)]
 
 

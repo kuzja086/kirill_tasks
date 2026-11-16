@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Награды</h1>
+
+{% if message == 'created' %}<p class="ok">Награда добавлена.</p>{% endif %}
+{% if message == 'updated' %}<p class="ok">Изменения сохранены.</p>{% endif %}
+{% if error == 'duplicate' %}<p class="error">Награда с таким названием уже есть.</p>{% endif %}
+{% if error == 'invalid' %}<p class="error">Проверьте поля: название не пустое (до 60 символов), стоимость — целое число от 1.</p>{% endif %}
+{% if error == 'missing' %}<p class="error">Награда не найдена.</p>{% endif %}
+
+<div class="card">
+  <h2>Добавить награду</h2>
+  <form method="post" action="/rewards" class="row">
+    <input name="title" placeholder="название" size="30" maxlength="60" required>
+    <input name="cost" type="number" min="1" step="1" placeholder="стоимость, баллы" required>
+    <button type="submit">Добавить</button>
+  </form>
+  <p class="muted">
+    Стоимость — сколько баллов ребёнок копит. Ориентир: награда «на неделю»
+    стоит примерно столько, сколько он зарабатывает за неделю.
+  </p>
+</div>
+
+{% if rewards %}
+<table>
+  <tr>
+    <th>#</th><th>Название</th><th>Стоимость</th><th>Доступна</th><th></th>
+  </tr>
+  {% for reward in rewards %}
+  <tr>
+    <td>{{ reward.id }}</td>
+    <td>
+      <input form="reward-{{ reward.id }}" name="title" value="{{ reward.title }}"
+             size="28" maxlength="60" required>
+    </td>
+    <td>
+      <input form="reward-{{ reward.id }}" name="cost" type="number" min="1" step="1"
+             value="{{ reward.cost }}" style="width: 110px" required>
+    </td>
+    <td>
+      <input form="reward-{{ reward.id }}" type="checkbox" name="is_active" value="true"
+             {% if reward.is_active %}checked{% endif %}>
+    </td>
+    <td>
+      <form id="reward-{{ reward.id }}" method="post" action="/rewards/{{ reward.id }}">
+        <button type="submit">Сохранить</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">
+  Выключенная награда исчезает из списка у Алисы, но остаётся в истории.
+</p>
+{% else %}
+<p class="muted">Наград пока нет — добавьте первую выше.</p>
+{% endif %}
+{% endblock %}

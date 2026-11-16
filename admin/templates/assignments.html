@@ -11,7 +11,7 @@
 {% if assignments %}
 <table>
   <tr>
-    <th>#</th><th>Ребёнок</th><th>Дата</th><th>Задача</th><th>Баллы</th><th></th>
+    <th>#</th><th>Ребёнок</th><th>Дата</th><th>Задача</th><th>Вид</th><th>Баллы</th><th></th>
   </tr>
   {% for item in assignments %}
   <tr>
@@ -19,6 +19,7 @@
     <td>{{ item.user_id }}</td>
     <td>{{ item.plan_date }}</td>
     <td>{{ item.title }}</td>
+    <td>{{ item.kind|kind }}</td>
     <td>{{ item.points|points }}</td>
     <td class="row">
       <form method="post" action="/assignments/{{ item.id }}/confirm">
@@ -31,7 +32,10 @@
   </tr>
   {% endfor %}
 </table>
-<p class="muted">Отклонение списывает баллы: ребёнок заявил о выполнении, но задача не сделана.</p>
+<p class="muted">
+  Отклонение списывает баллы: ребёнок заявил о выполнении, но задача не сделана.
+  Для дополнительных задач списания нет — они не входят в обязательный план.
+</p>
 {% else %}
 <p class="muted">Заявок нет.</p>
 {% endif %}

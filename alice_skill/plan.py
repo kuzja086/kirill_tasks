@@ -10,7 +10,7 @@ import hashlib
 from typing import Sequence
 
 from alice_skill.economy import RANDOM_TASKS_PER_DAY
-from alice_skill.models import Task
+from alice_skill.models import KIND_DAILY, KIND_RANDOM, Task
 
 
 def selection_key(seed: str, task_id: int) -> str:
@@ -39,5 +39,12 @@ def build_daily_plan(
     seed: str,
     random_count: int = RANDOM_TASKS_PER_DAY,
 ) -> tuple[Task, ...]:
-    """План дня: все ежедневные задачи плюс случайная выборка из пула."""
-    return tuple(daily_tasks) + select_random_tasks(random_pool, random_count, seed=seed)
+    """План дня: ежедневные задачи плюс случайная выборка из пула.
+
+    Дополнительные задачи (``kind = 'optional'``) в план не попадают: ребёнок
+    берёт их сам, и за пропуск баллы не списываются. Фильтр стоит здесь,
+    а не только в SQL, чтобы правило нельзя было обойти вызовом из кода.
+    """
+    daily = tuple(task for task in daily_tasks if task.kind == KIND_DAILY)
+    pool = tuple(task for task in random_pool if task.kind == KIND_RANDOM)
+    return daily + select_random_tasks(pool, random_count, seed=seed)

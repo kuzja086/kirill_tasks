@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Задачи</h1>
+
+{% if message == 'created' %}<p class="ok">Задача добавлена.</p>{% endif %}
+{% if message == 'updated' %}<p class="ok">Изменения сохранены.</p>{% endif %}
+{% if error == 'duplicate' %}<p class="error">Такая задача уже есть: название и вид должны быть уникальны.</p>{% endif %}
+{% if error == 'invalid' %}<p class="error">Проверьте поля: название не пустое (до 60 символов), баллы — целое число от 1 до 100.</p>{% endif %}
+{% if error == 'missing' %}<p class="error">Задача не найдена.</p>{% endif %}
+
+<div class="card">
+  <h2>Добавить задачу</h2>
+  <form method="post" action="/tasks" class="row">
+    <input name="title" placeholder="название" size="30" maxlength="60" required>
+    <select name="kind">
+      {% for value, label in kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input name="points" type="number" min="1" max="100" step="1" placeholder="баллы" required>
+    <button type="submit">Добавить</button>
+  </form>
+  <p class="muted">
+    Ежедневные и случайные задачи попадают в план дня. Дополнительные —
+    по желанию: за пропуск баллы не списываются.
+  </p>
+</div>
+
+{% if tasks %}
+<table>
+  <tr>
+    <th>#</th><th>Название</th><th>Вид</th><th>Баллы</th><th>Включена</th><th></th>
+  </tr>
+  {% for task in tasks %}
+  <tr>
+    <td>{{ task.id }}</td>
+    <td>
+      <input form="task-{{ task.id }}" name="title" value="{{ task.title }}"
+             size="28" maxlength="60" required>
+    </td>
+    <td>
+      <select form="task-{{ task.id }}" name="kind">
+        {% for value, label in kinds %}
+        <option value="{{ value }}" {% if value == task.kind %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td>
+      <input form="task-{{ task.id }}" name="points" type="number" min="1" max="100"
+             step="1" value="{{ task.points }}" style="width: 80px" required>
+    </td>
+    <td>
+      <input form="task-{{ task.id }}" type="checkbox" name="is_active" value="true"
+             {% if task.is_active %}checked{% endif %}>
+    </td>
+    <td>
+      <form id="task-{{ task.id }}" method="post" action="/tasks/{{ task.id }}">
+        <button type="submit">Сохранить</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">
+  Снимите «Включена», чтобы убрать задачу из плана без удаления истории.
+  Стоимость сохраняется в назначенных задачах на день — прошлые дни не меняются.
+</p>
+{% else %}
+<p class="muted">Задач пока нет — добавьте первую выше.</p>
+{% endif %}
+{% endblock %}

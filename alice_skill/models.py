@@ -8,15 +8,29 @@ from typing import Any
 
 from alice_skill.config import PROTOCOL_VERSION
 
-# Виды задач: ежедневные (повторяются каждый день) и случайные (выборка на день).
+# Виды задач: ежедневные (повторяются каждый день), случайные (выборка на день)
+# и дополнительные (ребёнок берёт их сам, за пропуск баллы не списываются).
 KIND_DAILY = "daily"
 KIND_RANDOM = "random"
+KIND_OPTIONAL = "optional"
+
+TASK_KINDS = (KIND_DAILY, KIND_RANDOM, KIND_OPTIONAL)
+
+# Ограничения справочника — общие для навыка и админки.
+TITLE_MAX_LENGTH = 60
+TASK_MIN_POINTS = 1
+TASK_MAX_POINTS = 100
+REWARD_MIN_COST = 1
+REWARD_MAX_COST = 100000
 
 # Статусы задачи в дневном плане.
 STATUS_PENDING = "pending"
 STATUS_AWAITING_CONFIRMATION = "awaiting_confirmation"
 STATUS_DONE = "done"
 STATUS_MISSED = "missed"
+
+# Результат claim_optional_task: заявка на дополнительную задачу создана сейчас.
+CLAIM_CREATED = "created"
 
 # Результаты попытки потратить баллы на награду.
 REDEEM_OK = "ok"
@@ -38,6 +52,63 @@ PENALTY_LIMIT_EXCEEDED = "limit_exceeded"
 PENALTY_INVALID = "invalid"
 
 
+def clean_title(value: str) -> str:
+    """Схлопывает пробелы и проверяет длину названия задачи или награды."""
+    cleaned = " ".join(str(value or "").split())
+    if not cleaned:
+        raise ValueError("Название не может быть пустым")
+    if len(cleaned) > TITLE_MAX_LENGTH:
+        raise ValueError(f"Название длиннее {TITLE_MAX_LENGTH} символов")
+    return cleaned
+
+
+def _as_whole_number(value: Any, *, minimum: int, maximum: int, label: str) -> int:
+    """Приводит значение из формы к целому числу и проверяет диапазон."""
+    if isinstance(value, float) and not value.is_integer():
+        raise ValueError(f"{label}: нужно целое число")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label}: нужно целое число") from error
+    if not minimum <= number <= maximum:
+        raise ValueError(f"{label}: допустимо от {minimum} до {maximum}")
+    return number
+
+
+def validate_task_input(title: str, kind: str, points: Any) -> tuple[str, str, int]:
+    """Проверяет данные задачи из админки.
+
+    :raises ValueError: если название пустое или длинное, вид неизвестен,
+        а баллы не целое число из допустимого диапазона.
+    """
+    cleaned_title = clean_title(title)
+    if kind not in TASK_KINDS:
+        raise ValueError("Неизвестный вид задачи")
+    cleaned_points = _as_whole_number(
+        points,
+        minimum=TASK_MIN_POINTS,
+        maximum=TASK_MAX_POINTS,
+        label="Баллы",
+    )
+    return cleaned_title, kind, cleaned_points
+
+
+def validate_reward_input(title: str, cost: Any) -> tuple[str, int]:
+    """Проверяет данные награды из админки.
+
+    :raises ValueError: если название пустое или длинное, стоимость не целое
+        число из допустимого диапазона.
+    """
+    cleaned_title = clean_title(title)
+    cleaned_cost = _as_whole_number(
+        cost,
+        minimum=REWARD_MIN_COST,
+        maximum=REWARD_MAX_COST,
+        label="Стоимость",
+    )
+    return cleaned_title, cleaned_cost
+
+
 @dataclass(frozen=True)
 class Task:
     """Задача из справочника."""
@@ -46,6 +117,7 @@ class Task:
     title: str
     kind: str
     points: int
+    is_active: bool = True
 
 
 @dataclass(frozen=True)
@@ -56,6 +128,7 @@ class Assignment:
     title: str
     points: int
     status: str = STATUS_PENDING
+    kind: str = KIND_DAILY
 
 
 @dataclass(frozen=True)
@@ -65,6 +138,7 @@ class Reward:
     id: int
     title: str
     cost: int
+    is_active: bool = True
 
 
 @dataclass(frozen=True)
@@ -122,6 +196,7 @@ class PendingAssignment:
     plan_date: dt.date
     title: str
     points: int
+    kind: str = KIND_DAILY
 
 
 @dataclass(frozen=True)

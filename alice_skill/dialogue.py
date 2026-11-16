@@ -17,6 +17,7 @@ import datetime as dt
 
 from alice_skill import matching, penalties, text
 from alice_skill.models import (
+    CLAIM_CREATED,
     PENALTY_CREATED,
     PENALTY_LIMIT_EXCEEDED,
     REDEEM_INSUFFICIENT,
@@ -28,6 +29,7 @@ from alice_skill.models import (
     AliceResponse,
     Assignment,
     Reward,
+    Task,
     make_button,
 )
 from alice_skill.repository import SkillRepository
@@ -44,6 +46,9 @@ INTENT_ADD_PENALTY = "add_penalty"
 SKILL_TIMEZONE = dt.timezone(dt.timedelta(hours=3), name="MSK")
 
 MAX_LINES = 8
+# Сколько дополнительных задач перечислять: они не обязательны и не должны
+# вытеснять план дня из ответа.
+OPTIONAL_LINES = 3
 
 TASKS_BUTTON = "Какие задачи на сегодня?"
 POINTS_BUTTON = "Сколько у меня баллов?"
@@ -135,7 +140,7 @@ def respond(
         balance = repository.get_balance(request.user_id)
 
         if intent == INTENT_LIST_TASKS:
-            return _list_tasks(assignments, balance)
+            return _list_tasks(assignments, balance, repository.list_optional_tasks())
         if intent == INTENT_MY_POINTS:
             return _my_points(repository, request.user_id, balance)
         if intent == INTENT_MY_GOAL:
@@ -143,7 +148,7 @@ def respond(
         if intent == INTENT_LIST_REWARDS:
             return _list_rewards(repository, balance)
         if intent == INTENT_TASK_DONE:
-            return _task_done(request, repository, assignments)
+            return _task_done(request, repository, assignments, today)
         if intent == INTENT_ADD_PENALTY:
             return _add_penalty(request, repository)
         return _want_reward(request, repository)
@@ -176,10 +181,19 @@ def _help() -> AliceResponse:
     )
 
 
-def _list_tasks(assignments: list[Assignment], balance: int) -> AliceResponse:
+def _list_tasks(
+    assignments: list[Assignment],
+    balance: int,
+    optional: list[Task] | None = None,
+) -> AliceResponse:
+    optional_note = _optional_tasks_note(optional or [])
+
     if not assignments:
         return AliceResponse(
-            text="На сегодня задач нет. Попросите взрослого добавить задачи в список."
+            text=(
+                "На сегодня обязательных задач нет. "
+                f"Попросите взрослого добавить задачи в список.{optional_note}"
+            )
         )
 
     shown = assignments[:MAX_LINES]
@@ -194,9 +208,30 @@ def _list_tasks(assignments: list[Assignment], balance: int) -> AliceResponse:
         text=(
             f"Задачи на сегодня: {lines_text}{tail}. "
             f"Всего можно получить {text.format_points(total)}, у тебя {text.format_points(balance)}."
+            f"{optional_note}"
         ),
-        tts=f"Задачи на сегодня: {lines_tts}{tail}. Всего можно получить {text.format_points(total)}.",
+        tts=(
+            f"Задачи на сегодня: {lines_tts}{tail}. "
+            f"Всего можно получить {text.format_points(total)}."
+            f"{optional_note}"
+        ),
         buttons=[make_button(POINTS_BUTTON, payload={"intent": INTENT_MY_POINTS})],
+    )
+
+
+def _optional_tasks_note(optional: list[Task]) -> str:
+    """Блок «если хочешь»: дополнительные задачи, за пропуск баллы не списываются."""
+    if not optional:
+        return ""
+
+    shown = optional[:OPTIONAL_LINES]
+    lines = "; ".join(
+        f"{task.title} — {text.format_points(task.points)}" for task in shown
+    )
+    tail = f", и ещё {len(optional) - len(shown)}" if len(optional) > len(shown) else ""
+    return (
+        f" Если хочешь, можно ещё: {lines}{tail}. "
+        "За них баллы не списываются, если не сделаешь."
     )
 
 
@@ -289,33 +324,67 @@ def _task_done(
     request: AliceRequest,
     repository: SkillRepository,
     assignments: list[Assignment],
+    today: dt.date,
 ) -> AliceResponse:
     phrase = f"{request.command} {request.original_utterance}".strip()
     match = matching.find_match([assignment.title for assignment in assignments], phrase)
 
-    if match is None:
+    if match is not None:
+        assignment = assignments[match.index]
+        status = repository.claim_assignment(assignment.id)
+        if status == STATUS_AWAITING_CONFIRMATION:
+            return AliceResponse(
+                text=(
+                    f"Записала: «{assignment.title}». Задача ждёт подтверждения — "
+                    f"{text.format_points(assignment.points)} начислятся после проверки."
+                )
+            )
+        if status == STATUS_DONE:
+            return AliceResponse(text=f"«{assignment.title}» уже засчитана.")
+        if status == STATUS_MISSED:
+            return AliceResponse(text=f"«{assignment.title}» уже отмечена пропущенной.")
+        return AliceResponse(text="Не получилось отметить задачу. Попробуй ещё раз.")
+
+    optional = repository.list_optional_tasks()
+    optional_match = matching.find_match([task.title for task in optional], phrase)
+    if optional_match is None:
         known = "; ".join(
             assignment.title for assignment in assignments[:MAX_LINES]
         ) or "задач нет"
-        return AliceResponse(
-            text=f"Не нашла такую задачу. Сегодня в плане: {known}. Назови задачу точнее."
-        )
-
-    assignment = assignments[match.index]
-    status = repository.claim_assignment(assignment.id)
-
-    if status == STATUS_AWAITING_CONFIRMATION:
+        extra = _optional_titles(optional)
         return AliceResponse(
             text=(
-                f"Записала: «{assignment.title}». Задача ждёт подтверждения — "
-                f"{text.format_points(assignment.points)} начислятся после проверки."
+                f"Не нашла такую задачу. Сегодня в плане: {known}.{extra} "
+                "Назови задачу точнее."
             )
         )
+
+    task = optional[optional_match.index]
+    status = repository.claim_optional_task(request.user_id, today, task)
+    if status == CLAIM_CREATED:
+        return AliceResponse(
+            text=(
+                f"Записала: «{task.title}». Это дополнительная задача — если не сделаешь, "
+                f"баллы не спишутся. {text.format_points(task.points)} начислятся "
+                "после подтверждения взрослого."
+            )
+        )
+    if status == STATUS_AWAITING_CONFIRMATION:
+        return AliceResponse(text=f"«{task.title}» уже ждёт подтверждения.")
     if status == STATUS_DONE:
-        return AliceResponse(text=f"«{assignment.title}» уже засчитана.")
+        return AliceResponse(text=f"«{task.title}» уже засчитана.")
     if status == STATUS_MISSED:
-        return AliceResponse(text=f"«{assignment.title}» уже отмечена пропущенной.")
+        return AliceResponse(text=f"«{task.title}» уже отмечена пропущенной.")
     return AliceResponse(text="Не получилось отметить задачу. Попробуй ещё раз.")
+
+
+def _optional_titles(optional: list[Task]) -> str:
+    """Подсказка о дополнительных задачах, когда фраза не совпала с планом."""
+    if not optional:
+        return ""
+
+    titles = ", ".join(task.title for task in optional[:OPTIONAL_LINES])
+    return f" Можно взять дополнительно: {titles}."
 
 
 def _want_reward(request: AliceRequest, repository: SkillRepository) -> AliceResponse:
