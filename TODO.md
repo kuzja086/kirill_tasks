@@ -5,14 +5,10 @@
 
 ## Блокеры запуска
 
-- [ ] **Механизм подтверждения задач родителем.**
-      Сейчас ребёнок переводит задачу в `awaiting_confirmation`, дальше она висит.
-      API готово: `PostgresSkillRepository.confirm_assignment(id)` (начисляет баллы)
-      и `.reject_assignment(id)` (переводит в `missed` и списывает).
-      Канал: мини-админка (веб-приложение в Docker, см. раздел ниже) —
-      основной вариант; альтернативы — интент с родительским PIN в этом же
-      навыке или отдельный бот. Требуется список заявок `pending`
-      (`tools/local.py pending` показывает их руками).
+- [x] **Механизм подтверждения задач родителем.**
+      Реализован в мини-админке: страница `/assignments` показывает заявки
+      `awaiting_confirmation`, кнопки вызывают `confirm_assignment` (начисляет
+      баллы) и `reject_assignment` (`missed` + списание).
 - [ ] **Выдача наград родителем.**
       `reward_redemptions.status`: `requested` → `issued` / `cancelled`.
       При `cancelled` вернуть баллы записью в `points_ledger`
@@ -88,12 +84,14 @@
 - [ ] **Логи функции.** Logging API отвечал `Unavailable`, поэтому трейсбеки
       не видны: создать лог-группу (`yc logging group create`) и перепривязать
       версию с `--log-group-id`, проверить `yc serverless function logs`.
-- [ ] **Убрать тестовые данные** пользователя `smoke` из рабочей базы:
+- [ ] **Убрать тестовые данные** пользователей `smoke` и `penalty-check`
+      из рабочей базы:
       ```sql
-      DELETE FROM points_ledger WHERE user_id = 'smoke';
-      DELETE FROM daily_assignments WHERE user_id = 'smoke';
-      DELETE FROM user_goals WHERE user_id = 'smoke';
-      DELETE FROM reward_redemptions WHERE user_id = 'smoke';
+      DELETE FROM penalties WHERE user_id IN ('smoke', 'penalty-check');
+      DELETE FROM points_ledger WHERE user_id IN ('smoke', 'penalty-check');
+      DELETE FROM daily_assignments WHERE user_id IN ('smoke', 'penalty-check');
+      DELETE FROM user_goals WHERE user_id IN ('smoke', 'penalty-check');
+      DELETE FROM reward_redemptions WHERE user_id IN ('smoke', 'penalty-check');
       ```
 - [ ] **Бэкапы БД** (pg_dump по расписанию) и проверка восстановления.
 - [ ] **Ротация пароля** по расписанию: `yc lockbox secret add-version`
@@ -103,9 +101,9 @@
 
 - [ ] **Интент «пропустил / не смог»** (`task_skip`): ребёнок честно отказывается
       от задачи — сразу `missed` и штраф, без ожидания конца дня.
-- [ ] **Интент `add_penalty`** — штраф голосом: «добавь штраф 10 баллов, не
-      выключил свет». Подробности в разделе «Штрафы»; имя интента нужно будет
-      натренировать в консоли Диалогов и добавить в README.
+- [x] **Интент `add_penalty`** — штраф голосом: «добавь штраф 10 баллов, не
+      выключил свет» (см. раздел «Штрафы»). Осталось натренировать имя интента
+      в консоли Диалогов; в README интент уже описан.
 - [ ] **Отчёт родителю**: сводка за неделю (выполнено/пропущено, баланс, заявки).
 - [ ] **Серия дней (стрик)**: счётчик подряд выполненных дней и бонус за серию.
 - [ ] **Управление задачами и наградами без SQL**: реализуется в мини-админке
