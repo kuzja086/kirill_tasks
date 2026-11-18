@@ -112,11 +112,6 @@ def detect_intent(request: AliceRequest) -> str | None:
     return None
 
 
-def today_in_skill_timezone() -> dt.date:
-    """Сегодняшняя дата по времени навыка (Екатеринбург, UTC+5)."""
-    return dt.datetime.now(SKILL_TIMEZONE).date()
-
-
 def respond(
     request: AliceRequest,
     repository: SkillRepository,
