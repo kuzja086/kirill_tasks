@@ -12,6 +12,8 @@ from alice_skill.models import (
     PENALTY_AWAITING,
     STATUS_AWAITING_CONFIRMATION,
     STATUS_DONE,
+    STATUS_MISSED,
+    STATUS_PENDING,
     AliceRequest,
 )
 from factories import FakeSkillRepository, make_assignment, make_reward, make_task
@@ -72,6 +74,98 @@ def test_list_tasks_without_plan_explains_what_to_do(alice_event) -> None:
     response = respond(request, FakeSkillRepository(), TODAY)
 
     assert "задач нет" in response.text
+
+
+def test_voice_lists_only_unfinished_tasks_without_points_and_statuses(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[
+            make_assignment(1, "Зарядка", points=2, status=STATUS_DONE),
+            make_assignment(2, "Прочитать 20 минут", points=2, status=STATUS_PENDING),
+        ]
+    )
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert response.tts is not None
+    assert "Осталось сделать: Прочитать 20 минут" in response.tts
+    assert "Зарядка" not in response.tts, "выполненные задачи не озвучиваются"
+    assert "не отмечена" not in response.tts
+    assert "балл" not in response.tts
+    # Экран остаётся подробным: цена и статус видны.
+    assert "Зарядка — 2 балла, засчитано" in response.text
+    assert "Прочитать 20 минут — 2 балла, не отмечена" in response.text
+
+
+def test_voice_mentions_waiting_tasks_when_some_are_pending(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[
+            make_assignment(1, "Зарядка", status=STATUS_PENDING),
+            make_assignment(2, "Читать", status=STATUS_AWAITING_CONFIRMATION),
+        ]
+    )
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "Осталось сделать: Зарядка" in response.tts
+    assert "Остальные задачи ждут подтверждения" in response.tts
+    assert "Читать" not in response.tts
+
+
+def test_voice_praises_when_all_tasks_done(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[
+            make_assignment(1, "Зарядка", status=STATUS_DONE),
+            make_assignment(2, "Читать", status=STATUS_DONE),
+        ]
+    )
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "Ты молодец" in response.tts
+    assert "Зарядка" not in response.tts
+    assert "Все обязательные задачи выполнены" in response.text
+    assert "молодец" in response.text
+
+
+def test_voice_praises_when_only_optional_tasks_remain(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[make_assignment(1, "Зарядка", status=STATUS_DONE)],
+        tasks=[make_task(21, "Полить цветы", kind="optional", points=1)],
+    )
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "Ты молодец" in response.tts
+    assert "Если хочешь, можно ещё" in response.tts
+    assert "Полить цветы" in response.tts
+
+
+def test_voice_waits_for_confirmation_without_praise(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[make_assignment(1, "Зарядка", status=STATUS_AWAITING_CONFIRMATION)]
+    )
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "ждут подтверждения взрослого" in response.tts
+    assert "молодец" not in response.tts
+
+
+def test_voice_does_not_praise_for_missed_task(alice_event) -> None:
+    repository = FakeSkillRepository(
+        assignments=[make_assignment(1, "Зарядка", status=STATUS_MISSED)]
+    )
+    request = _request(alice_event, "какие задачи", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)
+
+    assert "На сегодня обязательных задач не осталось" in response.tts
+    assert "молодец" not in response.tts
 def test_my_points_without_goal_suggests_choosing_reward(alice_event, repository) -> None:
     request = _request(alice_event, "сколько у меня баллов", intent=dialogue.INTENT_MY_POINTS)
 

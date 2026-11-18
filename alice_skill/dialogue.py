@@ -25,6 +25,7 @@ from alice_skill.models import (
     STATUS_AWAITING_CONFIRMATION,
     STATUS_DONE,
     STATUS_MISSED,
+    STATUS_PENDING,
     AliceRequest,
     AliceResponse,
     Assignment,
@@ -197,23 +198,66 @@ def _list_tasks(
     lines_text = "; ".join(
         text.format_task_line(assignment, index) for index, assignment in enumerate(shown, start=1)
     )
-    lines_tts = "; ".join(text.format_task_line(assignment) for assignment in shown)
     tail = f", и ещё {len(assignments) - len(shown)}" if len(assignments) > len(shown) else ""
     total = sum(assignment.points for assignment in assignments)
+
+    remaining = [
+        assignment
+        for assignment in assignments
+        if assignment.status == STATUS_PENDING
+    ]
+    awaiting = [
+        assignment
+        for assignment in assignments
+        if assignment.status == STATUS_AWAITING_CONFIRMATION
+    ]
+    all_done = all(assignment.status == STATUS_DONE for assignment in assignments)
+    praise = (
+        " Все обязательные задачи выполнены — ты молодец!" if all_done else ""
+    )
 
     return AliceResponse(
         text=(
             f"Задачи на сегодня: {lines_text}{tail}. "
             f"Всего можно получить {text.format_points(total)}, у тебя {text.format_points(balance)}."
-            f"{optional_note}"
+            f"{praise}{optional_note}"
         ),
-        tts=(
-            f"Задачи на сегодня: {lines_tts}{tail}. "
-            f"Всего можно получить {text.format_points(total)}."
-            f"{optional_note}"
-        ),
+        tts=_tasks_tts(remaining, awaiting, all_done, optional_note),
         buttons=[make_button(POINTS_BUTTON, payload={"intent": INTENT_MY_POINTS})],
     )
+
+
+def _tasks_tts(
+    remaining: list[Assignment],
+    awaiting: list[Assignment],
+    all_done: bool,
+    optional_note: str,
+) -> str:
+    """Озвучка списка: только невыполненное, без статусов и баллов.
+
+    Экран показывает подробности (цену и статус), а на слух ребёнку важно
+    услышать, что осталось сделать. Выполненные задачи не перечисляются.
+    """
+    if remaining:
+        shown = remaining[:MAX_LINES]
+        titles = ", ".join(assignment.title for assignment in shown)
+        tail = (
+            f" и ещё {len(remaining) - len(shown)}"
+            if len(remaining) > len(shown)
+            else ""
+        )
+        speech = f"Осталось сделать: {titles}{tail}."
+        if awaiting:
+            speech += " Остальные задачи ждут подтверждения."
+        return f"{speech}{optional_note}"
+
+    if awaiting:
+        return f"Все задачи отмечены, ждут подтверждения взрослого.{optional_note}"
+
+    if all_done:
+        return f"Все обязательные задачи выполнены. Ты молодец!{optional_note}"
+
+    return f"На сегодня обязательных задач не осталось.{optional_note}"
 
 
 def _optional_tasks_note(optional: list[Task]) -> str:
