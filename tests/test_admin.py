@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 from admin.app import create_app
 from alice_skill.models import (
     PENALTY_APPLIED,
+    REDEMPTION_CANCELLED,
+    REDEMPTION_ISSUED,
+    REDEMPTION_REQUESTED,
     STATUS_AWAITING_CONFIRMATION,
     STATUS_DONE,
     STATUS_MISSED,
@@ -450,3 +453,87 @@ def test_optional_assignment_is_labelled_and_not_penalized() -> None:
     assert repository.assignments[0].status == STATUS_MISSED
     assert repository.balance == 10, "за дополнительную задачу баллы не списываются"
     assert repository.ledger == []
+
+
+# --- выдача наград ---
+
+
+def _redeemed_repository() -> FakeSkillRepository:
+    repository = FakeSkillRepository(
+        rewards=[make_reward(1, "Мороженое", cost=25)],
+        balance=30,
+    )
+    repository.redeem_reward("user-1", 1)
+    return repository
+
+
+def test_redemptions_page_lists_requests() -> None:
+    repository = _redeemed_repository()
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/redemptions")
+
+    assert page.status_code == 200
+    assert "Мороженое" in page.text
+    assert "ждёт выдачи" in page.text
+    assert "Выдать" in page.text
+    assert "Отменить и вернуть баллы" in page.text
+
+
+def test_redemption_can_be_issued() -> None:
+    repository = _redeemed_repository()
+    client = _client(repository)
+    _login(client)
+
+    response = client.post("/redemptions/1/issue", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=issued")
+    assert repository.redemptions[0].status == REDEMPTION_ISSUED
+    assert repository.balance == 5, "при выдаче баллы не меняются"
+    assert repository.ledger == []
+
+
+def test_redemption_can_be_cancelled_with_refund() -> None:
+    repository = _redeemed_repository()
+    client = _client(repository)
+    _login(client)
+
+    response = client.post("/redemptions/1/cancel", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=cancelled")
+    assert repository.redemptions[0].status == REDEMPTION_CANCELLED
+    assert repository.balance == 30, "баллы вернулись на баланс"
+    assert [(entry.delta, entry.reason) for entry in repository.ledger] == [
+        (25, "reward_refund")
+    ]
+
+
+def test_unknown_redemption_reports_missing() -> None:
+    client = _client(FakeSkillRepository())
+    _login(client)
+
+    response = client.post("/redemptions/99/issue", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("error=missing")
+
+
+def test_dashboard_counts_pending_redemptions() -> None:
+    repository = _redeemed_repository()
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/")
+
+    assert "Заявок на награды: <strong>1</strong>" in page.text
+    assert "Мороженое" in page.text
+
+
+def test_redemption_request_has_waiting_status() -> None:
+    repository = _redeemed_repository()
+
+    assert repository.redemptions[0].status == REDEMPTION_REQUESTED
+    assert repository.list_redemptions(status=REDEMPTION_REQUESTED) == repository.redemptions

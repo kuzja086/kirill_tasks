@@ -19,6 +19,7 @@ from admin.labels import (
     kind_label,
     penalty_status_label,
     reason_label,
+    redemption_status_label,
     source_label,
     weekdays_label,
 )
@@ -29,6 +30,7 @@ from alice_skill.models import (
     PENALTY_AWAITING,
     PENALTY_CREATED,
     PENALTY_LIMIT_EXCEEDED,
+    REDEMPTION_REQUESTED,
     SOURCE_ADMIN,
     TASK_KINDS,
     TASK_MAX_POINTS,
@@ -65,6 +67,7 @@ def create_app(
     templates.env.filters["source"] = source_label
     templates.env.filters["kind"] = kind_label
     templates.env.filters["weekdays"] = weekdays_label
+    templates.env.filters["redemption_status"] = redemption_status_label
 
     def days_to_earn(cost: int, planned: int) -> str:
         """Сколько дней копить награду; «—», если плана дня ещё нет."""
@@ -131,6 +134,9 @@ def create_app(
                 "pending_assignments": repository.list_pending_assignments(),
                 "pending_penalties": repository.list_penalties(
                     status=PENALTY_AWAITING, limit=20
+                ),
+                "pending_redemptions": repository.list_redemptions(
+                    status=REDEMPTION_REQUESTED, limit=20
                 ),
                 "balances": {user: repository.get_balance(user) for user in users},
             },
@@ -234,6 +240,55 @@ def create_app(
         if rejected:
             return RedirectResponse("/penalties?message=rejected", status_code=303)
         return RedirectResponse("/penalties?error=missing", status_code=303)
+
+    # --- выдача наград ---
+
+    @app.get("/redemptions", response_class=HTMLResponse)
+    def redemptions(
+        request: Request,
+        status: str = REDEMPTION_REQUESTED,
+        message: str = "",
+        error: str = "",
+    ) -> HTMLResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        return render(
+            request,
+            "redemptions.html",
+            {
+                "redemptions": repository.list_redemptions(
+                    status=status or None,
+                    limit=100,
+                ),
+                "status": status,
+                "message": message,
+                "error": error,
+            },
+        )
+
+    @app.post("/redemptions/{redemption_id}/issue")
+    def issue_redemption(redemption_id: int, request: Request) -> RedirectResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        issued = repository.issue_redemption(redemption_id, resolved_by="admin")
+        if issued:
+            return RedirectResponse("/redemptions?message=issued", status_code=303)
+        return RedirectResponse("/redemptions?error=missing", status_code=303)
+
+    @app.post("/redemptions/{redemption_id}/cancel")
+    def cancel_redemption(redemption_id: int, request: Request) -> RedirectResponse:
+        redirect = guard(request)
+        if redirect is not None:
+            return redirect
+
+        cancelled = repository.cancel_redemption(redemption_id, resolved_by="admin")
+        if cancelled:
+            return RedirectResponse("/redemptions?message=cancelled", status_code=303)
+        return RedirectResponse("/redemptions?error=missing", status_code=303)
 
     @app.get("/history", response_class=HTMLResponse)
     def history(request: Request, user_id: str = "") -> HTMLResponse:

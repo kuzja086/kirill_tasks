@@ -42,6 +42,11 @@ REDEEM_OK = "ok"
 REDEEM_INSUFFICIENT = "insufficient"
 REDEEM_NOT_FOUND = "not_found"
 
+# Статусы заявки на награду: баллы списаны при заявке, выдаёт родитель.
+REDEMPTION_REQUESTED = "requested"
+REDEMPTION_ISSUED = "issued"
+REDEMPTION_CANCELLED = "cancelled"
+
 # Статусы заявки на штраф: баллы списываются только при подтверждении.
 PENALTY_AWAITING = "awaiting_confirmation"
 PENALTY_APPLIED = "applied"
@@ -186,6 +191,25 @@ class Reward:
     title: str
     cost: int
     is_active: bool = True
+
+
+@dataclass(frozen=True)
+class Redemption:
+    """Заявка ребёнка на награду.
+
+    Баллы списываются сразу при заявке; ``status`` показывает, выдал ли
+    взрослый награду (``issued``) или отменил её с возвратом баллов
+    (``cancelled``).
+    """
+
+    id: int
+    user_id: str
+    title: str
+    cost: int
+    status: str = REDEMPTION_REQUESTED
+    created_at: dt.datetime | None = None
+    resolved_at: dt.datetime | None = None
+    resolved_by: str | None = None
 
 
 @dataclass(frozen=True)

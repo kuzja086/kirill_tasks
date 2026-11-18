@@ -17,6 +17,12 @@ PENALTY_STATUS_LABELS = {
     "rejected": "отклонён",
 }
 
+REDEMPTION_STATUS_LABELS = {
+    "requested": "ждёт выдачи",
+    "issued": "выдано",
+    "cancelled": "отменено",
+}
+
 SOURCE_LABELS = {
     "alice": "Алиса",
     "admin": "админка",
@@ -47,6 +53,10 @@ def reason_label(reason: str) -> str:
 
 def penalty_status_label(status: str) -> str:
     return PENALTY_STATUS_LABELS.get(status, status)
+
+
+def redemption_status_label(status: str) -> str:
+    return REDEMPTION_STATUS_LABELS.get(status, status)
 
 
 def source_label(source: str) -> str:

@@ -30,6 +30,7 @@ from alice_skill.models import (
     Penalty,
     PenaltyResult,
     PendingAssignment,
+    Redemption,
     RedeemOutcome,
     Reward,
     Task,
@@ -232,6 +233,37 @@ INSERT_REDEEM_LEDGER = """
     INSERT INTO points_ledger (user_id, delta, reason, reward_redemption_id)
     VALUES (%s, %s, 'reward_redeem', %s)
 """
+
+SELECT_REDEMPTIONS = """
+    SELECT id, user_id, title, cost, status, created_at, resolved_at, resolved_by
+      FROM reward_redemptions
+     WHERE (%s::text IS NULL OR user_id = %s)
+       AND (%s::text IS NULL OR status = %s)
+     ORDER BY created_at DESC, id DESC
+     LIMIT %s
+"""
+
+ISSUE_REDEMPTION = """
+    UPDATE reward_redemptions
+       SET status = 'issued', resolved_at = now(), resolved_by = %s
+     WHERE id = %s AND status = 'requested'
+    RETURNING id
+"""
+
+CANCEL_REDEMPTION = """
+    UPDATE reward_redemptions
+       SET status = 'cancelled', resolved_at = now(), resolved_by = %s
+     WHERE id = %s AND status = 'requested'
+    RETURNING id, user_id, cost
+"""
+
+# Возврат баллов при отмене заявки. Уникальный индекс на
+# (reward_redemption_id, reason) не даёт вернуть дважды.
+INSERT_REFUND_LEDGER = """
+    INSERT INTO points_ledger (user_id, delta, reason, reward_redemption_id)
+    VALUES (%s, %s, 'reward_refund', %s)
+    ON CONFLICT DO NOTHING
+"""
 # --- SQL-КОНСТАНТЫ-ШТРАФОВ ---
 
 COUNT_RECENT_PENALTIES = """
@@ -370,6 +402,21 @@ class SkillRepository(Protocol):
 
     def redeem_reward(self, user_id: str, reward_id: int) -> RedeemOutcome:
         """Списывает баллы за награду, если их хватает."""
+
+    def list_redemptions(
+        self,
+        *,
+        user_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[Redemption]:
+        """Заявки на награды, свежие сверху."""
+
+    def issue_redemption(self, redemption_id: int, *, resolved_by: str = "admin") -> bool:
+        """Отмечает награду выданной; баллы не меняются."""
+
+    def cancel_redemption(self, redemption_id: int, *, resolved_by: str = "admin") -> bool:
+        """Отменяет заявку и возвращает баллы записью ``reward_refund``."""
 
     def claim_assignment(self, assignment_id: int) -> str | None:
         """Переводит задачу в ожидание подтверждения и возвращает её статус."""
@@ -594,6 +641,29 @@ class PostgresSkillRepository:
         return self._run(
             lambda cursor: self._redeem(cursor, user_id, reward_id),
             lock_user=user_id,
+        )
+
+    # --- выдача наград ---
+
+    def list_redemptions(
+        self,
+        *,
+        user_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[Redemption]:
+        return self._run(
+            lambda cursor: self._select_redemptions(cursor, user_id, status, limit)
+        )
+
+    def issue_redemption(self, redemption_id: int, *, resolved_by: str = "admin") -> bool:
+        return self._run(
+            lambda cursor: self._issue_redemption(cursor, redemption_id, resolved_by)
+        )
+
+    def cancel_redemption(self, redemption_id: int, *, resolved_by: str = "admin") -> bool:
+        return self._run(
+            lambda cursor: self._cancel_redemption(cursor, redemption_id, resolved_by)
         )
 
     # --- точка расширения для будущего подтверждения задач родителем ---
@@ -909,6 +979,52 @@ class PostgresSkillRepository:
             redemption_id=redemption_id,
             reward=reward,
         )
+
+    def _select_redemptions(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        user_id: str | None,
+        status: str | None,
+        limit: int,
+    ) -> list[Redemption]:
+        cursor.execute(SELECT_REDEMPTIONS, (user_id, user_id, status, status, limit))
+        return [
+            Redemption(
+                id=row[0],
+                user_id=row[1],
+                title=row[2],
+                cost=row[3],
+                status=row[4],
+                created_at=row[5],
+                resolved_at=row[6],
+                resolved_by=row[7],
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def _issue_redemption(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        redemption_id: int,
+        resolved_by: str,
+    ) -> bool:
+        cursor.execute(ISSUE_REDEMPTION, (resolved_by, redemption_id))
+        return cursor.fetchone() is not None
+
+    def _cancel_redemption(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        redemption_id: int,
+        resolved_by: str,
+    ) -> bool:
+        cursor.execute(CANCEL_REDEMPTION, (resolved_by, redemption_id))
+        row = cursor.fetchone()
+        if row is None:
+            return False
+
+        _, user_id, cost = row
+        cursor.execute(INSERT_REFUND_LEDGER, (user_id, int(cost), redemption_id))
+        return True
 
     def _add_penalty(
         self,

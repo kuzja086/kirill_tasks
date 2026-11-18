@@ -14,6 +14,7 @@ from alice_skill.models import (
     STATUS_DONE,
     STATUS_MISSED,
     STATUS_PENDING,
+    REDEMPTION_REQUESTED,
     AliceRequest,
 )
 from factories import FakeSkillRepository, make_assignment, make_reward, make_task
@@ -273,8 +274,9 @@ def test_want_reward_spends_points(alice_event, repository) -> None:
 
     assert "Готово" in response.text
     assert "5 баллов" in response.text
-    assert repository.redemptions == [1]
+    assert repository.redeemed_reward_ids == [1]
     assert repository.balance == 5
+    assert repository.redemptions[0].status == REDEMPTION_REQUESTED
 
 
 def test_want_unaffordable_reward_sets_goal(alice_event, repository) -> None:
@@ -285,7 +287,7 @@ def test_want_unaffordable_reward_sets_goal(alice_event, repository) -> None:
     assert "Пока не хватает 40 баллов" in response.text
     assert repository.goal_requests == [2]
     assert repository.goal is not None
-    assert repository.redemptions == []
+    assert repository.redeemed_reward_ids == []
 
 
 def test_want_unknown_reward_lists_rewards(alice_event, repository) -> None:
@@ -295,7 +297,7 @@ def test_want_unknown_reward_lists_rewards(alice_event, repository) -> None:
 
     assert "Не нашла такую награду" in response.text
     assert "Мороженое" in response.text
-    assert repository.redemptions == []
+    assert repository.redeemed_reward_ids == []
 
 
 def test_today_in_skill_timezone_is_date() -> None:

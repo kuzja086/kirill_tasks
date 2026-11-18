@@ -23,10 +23,12 @@ from alice_skill.models import (
     LedgerEntry,
     Penalty,
     PendingAssignment,
+    Redemption,
     Reward,
     Task,
 )
 from alice_skill.repository import (
+    CANCEL_REDEMPTION,
     CLAIM_ASSIGNMENT,
     CONFIRM_ASSIGNMENT,
     CONFIRM_PENALTY,
@@ -40,8 +42,10 @@ from alice_skill.repository import (
     INSERT_PENALTY_LEDGER,
     INSERT_REDEEM_LEDGER,
     INSERT_REDEMPTION,
+    INSERT_REFUND_LEDGER,
     INSERT_REWARD,
     INSERT_TASK,
+    ISSUE_REDEMPTION,
     LINK_PENALTY_LEDGER,
     PostgresSkillRepository,
     REJECT_ASSIGNMENT,
@@ -59,6 +63,7 @@ from alice_skill.repository import (
     SELECT_PENDING_ASSIGNMENTS,
     SELECT_PLAN,
     SELECT_RANDOM_TASKS,
+    SELECT_REDEMPTIONS,
     SELECT_REWARD,
     SELECT_REWARDS,
     SELECT_USERS,
@@ -288,6 +293,79 @@ def test_redeem_reward_returns_not_found_for_unknown_reward() -> None:
 
     assert outcome.status == REDEEM_NOT_FOUND
     assert outcome.reward is None
+
+
+def test_list_redemptions_maps_rows() -> None:
+    created_at = dt.datetime(2026, 11, 18, 12, 0)
+    resolved_at = dt.datetime(2026, 11, 18, 13, 0)
+    database = FakeDatabase(
+        {
+            SELECT_REDEMPTIONS: [
+                [
+                    (
+                        3,
+                        "user-1",
+                        "Мороженое",
+                        25,
+                        "issued",
+                        created_at,
+                        resolved_at,
+                        "admin",
+                    )
+                ]
+            ]
+        }
+    )
+
+    redemptions = _repository(database).list_redemptions(
+        user_id="user-1", status="issued"
+    )
+
+    assert redemptions == [
+        Redemption(
+            id=3,
+            user_id="user-1",
+            title="Мороженое",
+            cost=25,
+            status="issued",
+            created_at=created_at,
+            resolved_at=resolved_at,
+            resolved_by="admin",
+        )
+    ]
+    assert _executed(database, SELECT_REDEMPTIONS) == [
+        ("user-1", "user-1", "issued", "issued", 50)
+    ]
+
+
+def test_issue_redemption_marks_request_as_issued() -> None:
+    database = FakeDatabase({ISSUE_REDEMPTION: [[(3,)]]})
+
+    assert _repository(database).issue_redemption(3) is True
+    assert _executed(database, ISSUE_REDEMPTION) == [("admin", 3)]
+    assert _executed(database, INSERT_REFUND_LEDGER) == []
+
+
+def test_issue_redemption_returns_false_for_resolved_request() -> None:
+    database = FakeDatabase({ISSUE_REDEMPTION: [[]]})
+
+    assert _repository(database).issue_redemption(3) is False
+    assert _executed(database, INSERT_REFUND_LEDGER) == []
+
+
+def test_cancel_redemption_refunds_points() -> None:
+    database = FakeDatabase({CANCEL_REDEMPTION: [[(3, "user-1", 25)]]})
+
+    assert _repository(database).cancel_redemption(3) is True
+    assert _executed(database, CANCEL_REDEMPTION) == [("admin", 3)]
+    assert _executed(database, INSERT_REFUND_LEDGER) == [("user-1", 25, 3)]
+
+
+def test_cancel_redemption_does_not_refund_twice() -> None:
+    database = FakeDatabase({CANCEL_REDEMPTION: [[]]})
+
+    assert _repository(database).cancel_redemption(3) is False
+    assert _executed(database, INSERT_REFUND_LEDGER) == []
 
 
 def test_operation_retries_once_after_connection_error() -> None:

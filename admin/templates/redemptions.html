@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Выдача наград</h1>
+
+{% if message == 'issued' %}<p class="ok">Награда отмечена выданной.</p>{% endif %}
+{% if message == 'cancelled' %}<p class="ok">Заявка отменена, баллы возвращены.</p>{% endif %}
+{% if error == 'missing' %}<p class="error">Заявка не найдена или уже обработана.</p>{% endif %}
+
+<div class="row" style="margin-bottom: 12px">
+  <a href="/redemptions?status=requested">Ждут выдачи</a> ·
+  <a href="/redemptions?status=issued">Выданные</a> ·
+  <a href="/redemptions?status=cancelled">Отменённые</a> ·
+  <a href="/redemptions?status=">Все</a>
+</div>
+
+{% if redemptions %}
+<p class="muted">
+  Баллы списываются сразу при заявке. «Выдать» — отметить, что награда
+  получена; «Отменить» — вернуть баллы на баланс (запись «Возврат за награду»).
+</p>
+<table>
+  <tr>
+    <th>#</th><th>Когда</th><th>Ребёнок</th><th>Награда</th>
+    <th>Стоимость</th><th>Статус</th><th>Обработано</th><th></th>
+  </tr>
+  {% for item in redemptions %}
+  <tr>
+    <td>{{ item.id }}</td>
+    <td>{{ item.created_at.strftime('%d.%m %H:%M') if item.created_at else '' }}</td>
+    <td>{{ item.user_id }}</td>
+    <td>{{ item.title }}</td>
+    <td>{{ item.cost|points }}</td>
+    <td>{{ item.status|redemption_status }}</td>
+    <td>
+      {% if item.resolved_at %}
+      {{ item.resolved_at.strftime('%d.%m %H:%M') }}{% if item.resolved_by %} · {{ item.resolved_by }}{% endif %}
+      {% endif %}
+    </td>
+    <td class="row">
+      {% if item.status == 'requested' %}
+      <form method="post" action="/redemptions/{{ item.id }}/issue">
+        <button type="submit">Выдать</button>
+      </form>
+      <form method="post" action="/redemptions/{{ item.id }}/cancel">
+        <button class="secondary" type="submit">Отменить и вернуть баллы</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Заявок нет.</p>
+{% endif %}
+{% endblock %}

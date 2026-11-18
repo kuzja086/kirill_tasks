@@ -18,6 +18,9 @@ from alice_skill.models import (
     PENALTY_REJECTED,
     REDEEM_INSUFFICIENT,
     REDEEM_OK,
+    REDEMPTION_CANCELLED,
+    REDEMPTION_ISSUED,
+    REDEMPTION_REQUESTED,
     SOURCE_ALICE,
     STATUS_AWAITING_CONFIRMATION,
     STATUS_DONE,
@@ -28,6 +31,7 @@ from alice_skill.models import (
     Penalty,
     PenaltyResult,
     PendingAssignment,
+    Redemption,
     RedeemOutcome,
     Reward,
     Task,
@@ -99,7 +103,8 @@ class FakeSkillRepository:
         self.plan_requests: list[tuple[str, Any]] = []
         self.claims: list[int] = []
         self.optional_claims: list[int] = []
-        self.redemptions: list[int] = []
+        self.redeemed_reward_ids: list[int] = []
+        self.redemptions: list[Redemption] = []
         self.goal_requests: list[int] = []
         self.user_id = user_id
         self.max_points = max_points
@@ -112,6 +117,7 @@ class FakeSkillRepository:
         self._next_assignment_id = max(
             (assignment.id for assignment in self.assignments), default=0
         ) + 1
+        self._next_redemption_id = 1
         # Заявки на дополнительные задачи: task_id -> assignment_id.
         self._optional_assignment_ids: dict[int, int] = {}
 
@@ -188,15 +194,75 @@ class FakeSkillRepository:
             )
 
         self.balance -= reward.cost
-        self.redemptions.append(reward.id)
+        self.redeemed_reward_ids.append(reward.id)
+        redemption = Redemption(
+            id=self._next_redemption_id,
+            user_id=user_id,
+            title=reward.title,
+            cost=reward.cost,
+        )
+        self._next_redemption_id += 1
+        self.redemptions.append(redemption)
         if self.goal is not None and self.goal.id == reward.id:
             self.goal = None
         return RedeemOutcome(
             status=REDEEM_OK,
             balance=self.balance,
-            redemption_id=len(self.redemptions),
+            redemption_id=redemption.id,
             reward=reward,
         )
+
+    # --- выдача наград ---
+
+    def list_redemptions(
+        self,
+        *,
+        user_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[Redemption]:
+        found = [
+            redemption
+            for redemption in self.redemptions
+            if (user_id is None or redemption.user_id == user_id)
+            and (status is None or redemption.status == status)
+        ]
+        return list(reversed(found))[:limit]
+
+    def issue_redemption(self, redemption_id: int, *, resolved_by: str = "admin") -> bool:
+        for index, redemption in enumerate(self.redemptions):
+            if redemption.id != redemption_id or redemption.status != REDEMPTION_REQUESTED:
+                continue
+            self.redemptions[index] = replace(
+                redemption,
+                status=REDEMPTION_ISSUED,
+                resolved_at=dt.datetime.now(),
+                resolved_by=resolved_by,
+            )
+            return True
+        return False
+
+    def cancel_redemption(self, redemption_id: int, *, resolved_by: str = "admin") -> bool:
+        for index, redemption in enumerate(self.redemptions):
+            if redemption.id != redemption_id or redemption.status != REDEMPTION_REQUESTED:
+                continue
+            self.redemptions[index] = replace(
+                redemption,
+                status=REDEMPTION_CANCELLED,
+                resolved_at=dt.datetime.now(),
+                resolved_by=resolved_by,
+            )
+            self.balance += redemption.cost
+            self.ledger.append(
+                LedgerEntry(
+                    id=len(self.ledger) + 1,
+                    delta=redemption.cost,
+                    reason="reward_refund",
+                    details=redemption.title,
+                )
+            )
+            return True
+        return False
 
     def claim_assignment(self, assignment_id: int) -> str | None:
         self.claims.append(assignment_id)

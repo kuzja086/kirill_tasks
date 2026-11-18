@@ -5,12 +5,34 @@
 <div class="card">
   <p>
     Заявок на выполнение: <strong>{{ pending_assignments|length }}</strong> ·
-    Заявок на штраф: <strong>{{ pending_penalties|length }}</strong>
+    Заявок на штраф: <strong>{{ pending_penalties|length }}</strong> ·
+    Заявок на награды: <strong>{{ pending_redemptions|length }}</strong>
   </p>
   <p class="row">
     <a href="/assignments">Проверить заявки на выполнение</a>
     <a href="/penalties">Штрафы</a>
+    <a href="/redemptions">Выдать награды</a>
   </p>
+</div>
+
+<div class="card">
+  <h2>Заявки на награды</h2>
+  {% if pending_redemptions %}
+  <table>
+    <tr><th>#</th><th>Ребёнок</th><th>Награда</th><th>Стоимость</th><th></th></tr>
+    {% for item in pending_redemptions %}
+    <tr>
+      <td>{{ item.id }}</td>
+      <td>{{ item.user_id }}</td>
+      <td>{{ item.title }}</td>
+      <td>{{ item.cost|points }}</td>
+      <td><a href="/redemptions">Обработать</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Заявок на награды нет.</p>
+  {% endif %}
 </div>
 
 <div class="card">
