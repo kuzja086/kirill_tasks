@@ -308,11 +308,14 @@ class FakeSkillRepository:
             if assignment.kind == KIND_OPTIONAL:
                 # Дополнительные задачи не штрафуются: баллы не списываются.
                 return
-            self.balance -= assignment.points
+            charged = min(assignment.points, max(self.balance, 0))
+            if charged <= 0:
+                return
+            self.balance -= charged
             self.ledger.append(
                 LedgerEntry(
                     id=len(self.ledger) + 1,
-                    delta=-assignment.points,
+                    delta=-charged,
                     reason="task_missed",
                     details=assignment.title,
                 )
@@ -361,12 +364,20 @@ class FakeSkillRepository:
         for index, penalty in enumerate(self.penalties):
             if penalty.id != penalty_id or penalty.status != PENALTY_AWAITING:
                 continue
-            self.penalties[index] = replace(penalty, status=PENALTY_APPLIED)
-            self.balance -= penalty.points
+            # Баланс не может уйти в минус: списываем не больше остатка.
+            charged = min(penalty.points, max(self.balance, 0))
+            self.penalties[index] = replace(
+                penalty,
+                status=PENALTY_APPLIED,
+                charged_points=charged,
+            )
+            if charged <= 0:
+                return True
+            self.balance -= charged
             self.ledger.append(
                 LedgerEntry(
                     id=len(self.ledger) + 1,
-                    delta=-penalty.points,
+                    delta=-charged,
                     reason="penalty",
                     comment=penalty.comment,
                 )

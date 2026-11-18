@@ -209,7 +209,9 @@ def test_ensure_daily_plan_applies_penalties_first() -> None:
 
     _repository(database).ensure_daily_plan("user-1", TODAY)
 
-    assert _executed(database, APPLY_MISSED_PENALTIES) == [("user-1", TODAY, "user-1")]
+    assert _executed(database, APPLY_MISSED_PENALTIES) == [
+        ("user-1", "user-1", TODAY, "user-1")
+    ]
     assert _executed(database, INSERT_ASSIGNMENT) == []
 
 
@@ -358,15 +360,26 @@ def test_add_penalty_respects_daily_limit() -> None:
 def test_confirm_penalty_writes_ledger_and_links_request() -> None:
     database = FakeDatabase(
         {
-            CONFIRM_PENALTY: [[(7, "user-1", 10, "не выключил свет")]],
+            CONFIRM_PENALTY: [[(7, "user-1", 10, "не выключил свет", 3)]],
             INSERT_PENALTY_LEDGER: [[(99,)]],
         }
     )
 
     assert _repository(database).confirm_penalty(7) is True
 
-    assert _executed(database, INSERT_PENALTY_LEDGER) == [("user-1", -10, "не выключил свет")]
+    assert _executed(database, INSERT_PENALTY_LEDGER) == [
+        ("user-1", -3, "не выключил свет")
+    ], "списываем только остаток, а не всю сумму штрафа"
     assert _executed(database, LINK_PENALTY_LEDGER) == [(99, 7)]
+
+
+def test_confirm_penalty_with_zero_balance_writes_nothing() -> None:
+    database = FakeDatabase({CONFIRM_PENALTY: [[(7, "user-1", 10, "шум", 0)]]})
+
+    assert _repository(database).confirm_penalty(7) is True
+
+    assert _executed(database, INSERT_PENALTY_LEDGER) == []
+    assert _executed(database, LINK_PENALTY_LEDGER) == []
 
 
 def test_confirm_penalty_returns_false_for_already_resolved() -> None:
@@ -388,7 +401,18 @@ def test_list_penalties_maps_rows() -> None:
     database = FakeDatabase(
         {
             SELECT_PENALTIES: [
-                [(7, "user-1", 10, "шум", "alice", "awaiting_confirmation", created_at)]
+                [
+                    (
+                        7,
+                        "user-1",
+                        10,
+                        "шум",
+                        "alice",
+                        "awaiting_confirmation",
+                        created_at,
+                        None,
+                    )
+                ]
             ]
         }
     )
@@ -568,6 +592,13 @@ def test_optional_tasks_are_not_penalized_in_sql() -> None:
     assert "kind <> 'optional'" in REJECT_ASSIGNMENT
     assert "kind <> 'optional'" in APPLY_MISSED_PENALTIES
     assert "kind <> 'optional'" in SELECT_PLAN
+
+
+def test_deductions_are_capped_by_balance_in_sql() -> None:
+    # Баланс не может уйти в минус: каждое списание ограничено остатком.
+    assert "LEAST(points, GREATEST(amount - already, 0))" in APPLY_MISSED_PENALTIES
+    assert "LEAST(r.points, GREATEST(COALESCE(b.amount, 0), 0))" in REJECT_ASSIGNMENT
+    assert "charged_points = LEAST(" in CONFIRM_PENALTY
 
 
 def test_list_all_rewards_includes_inactive() -> None:

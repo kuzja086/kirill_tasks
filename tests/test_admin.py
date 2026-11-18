@@ -105,7 +105,21 @@ def test_assignment_can_be_rejected() -> None:
 
     assert response.status_code == 303
     assert repository.assignments[0].status == STATUS_MISSED
-    assert repository.balance == -10
+    assert repository.balance == 0, "списывать нечего: баланс и так 0"
+
+
+def test_assignment_rejection_does_not_go_below_zero() -> None:
+    repository = FakeSkillRepository(
+        assignments=[make_assignment(1, "Зарядка", points=10, status=STATUS_AWAITING_CONFIRMATION)],
+        balance=3,
+    )
+    client = _client(repository)
+    _login(client)
+
+    client.post("/assignments/1/reject", follow_redirects=False)
+
+    assert repository.balance == 0
+    assert [entry.delta for entry in repository.ledger] == [-3]
 
 
 def test_penalty_can_be_applied_from_admin() -> None:
@@ -122,7 +136,25 @@ def test_penalty_can_be_applied_from_admin() -> None:
 
     assert response.status_code == 303
     assert repository.penalties[0].status == PENALTY_APPLIED
+    assert repository.penalties[0].charged_points == 10
     assert repository.balance == 40
+
+
+def test_penalty_is_capped_by_available_points() -> None:
+    repository = FakeSkillRepository(balance=3)
+    repository.add_penalty("user-1", 10, "разбил чашку")
+    client = _client(repository)
+    _login(client)
+
+    client.post("/penalties/1/apply", follow_redirects=False)
+
+    assert repository.penalties[0].charged_points == 3
+    assert repository.balance == 0
+    assert [entry.delta for entry in repository.ledger] == [-3]
+
+    page = client.get("/penalties?status=applied")
+    assert "−3" in page.text
+    assert "из 10" in page.text
 
 
 def test_manual_penalty_creates_request() -> None:
@@ -160,7 +192,7 @@ def test_manual_penalty_rejects_invalid_amount() -> None:
 
 
 def test_history_shows_reasons() -> None:
-    repository = FakeSkillRepository()
+    repository = FakeSkillRepository(balance=20)
     repository.add_penalty("user-1", 10, "не выключил свет")
     repository.confirm_penalty(1)
     client = _client(repository)

@@ -91,18 +91,3 @@ def test_load_settings_rejects_unknown_sslmode() -> None:
         load_settings(env)
 
     assert "PG_SSLMODE" in str(error.value)
-
-
-def test_load_settings_omits_hostaddr_by_default() -> None:
-    settings = load_settings(VALID_ENV)
-
-    assert settings.pg_hostaddr is None
-    assert "hostaddr" not in settings.connection_params
-
-
-def test_load_settings_passes_hostaddr() -> None:
-    settings = load_settings(dict(VALID_ENV, PG_HOSTADDR="77.223.68.17"))
-
-    assert settings.pg_hostaddr == "77.223.68.17"
-    assert settings.connection_params["hostaddr"] == "77.223.68.17"
-    assert settings.connection_params["host"] == "203.0.113.10"

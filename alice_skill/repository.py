@@ -83,17 +83,38 @@ UPSERT_GOAL = """
 
 DELETE_GOAL = "DELETE FROM user_goals WHERE user_id = %s AND reward_id = %s"
 APPLY_MISSED_PENALTIES = """
-    WITH missed AS (
+    WITH balance AS (
+        SELECT COALESCE(SUM(delta), 0) AS amount
+          FROM points_ledger
+         WHERE user_id = %s
+    ),
+    missed AS (
         UPDATE daily_assignments
            SET status = 'missed', resolved_at = now()
          WHERE user_id = %s
            AND plan_date < %s
            AND status = 'pending'
            AND kind <> 'optional'
-        RETURNING id, points
+        RETURNING id, points, plan_date
+    ),
+    ordered AS (
+        SELECT id, points,
+               COALESCE(
+                   SUM(points) OVER (
+                       ORDER BY plan_date, id
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                   ),
+                   0
+               ) AS already
+          FROM missed
     )
     INSERT INTO points_ledger (user_id, delta, reason, assignment_id)
-    SELECT %s, -points, 'task_missed', id FROM missed
+    SELECT %s,
+           -LEAST(points, GREATEST(amount - already, 0)),
+           'task_missed',
+           id
+      FROM ordered CROSS JOIN balance
+     WHERE LEAST(points, GREATEST(amount - already, 0)) > 0
 """
 
 SELECT_PLAN = """
@@ -194,11 +215,22 @@ REJECT_ASSIGNMENT = """
            SET status = 'missed', resolved_at = now()
          WHERE id = %s AND status = 'awaiting_confirmation'
         RETURNING id, user_id, points, kind
+    ),
+    charged AS (
+        SELECT r.id, r.user_id,
+               LEAST(r.points, GREATEST(COALESCE(b.amount, 0), 0)) AS points
+          FROM rejected r
+          LEFT JOIN LATERAL (
+              SELECT SUM(delta) AS amount
+                FROM points_ledger
+               WHERE user_id = r.user_id
+          ) b ON TRUE
+         WHERE r.kind <> 'optional'
     )
     INSERT INTO points_ledger (user_id, delta, reason, assignment_id)
     SELECT user_id, -points, 'task_missed', id
-      FROM rejected
-     WHERE kind <> 'optional'
+      FROM charged
+     WHERE points > 0
     ON CONFLICT (assignment_id, reason) DO NOTHING
 """
 
@@ -229,7 +261,8 @@ INSERT_PENALTY = """
 """
 
 SELECT_PENALTIES = """
-    SELECT id, user_id, points, comment, source, status, created_at
+    SELECT id, user_id, points, comment, source, status, created_at,
+           charged_points
       FROM penalties
      WHERE (%s::text IS NULL OR user_id = %s)
        AND (%s::text IS NULL OR status = %s)
@@ -237,11 +270,26 @@ SELECT_PENALTIES = """
      LIMIT %s
 """
 
+# Баланс не может уйти в минус: списываем не больше того, что накоплено.
 CONFIRM_PENALTY = """
-    UPDATE penalties
-       SET status = 'applied', resolved_at = now(), resolved_by = %s
-     WHERE id = %s AND status = 'awaiting_confirmation'
-    RETURNING id, user_id, points, comment
+    UPDATE penalties AS p
+       SET status = 'applied',
+           resolved_at = now(),
+           resolved_by = %s,
+           charged_points = LEAST(
+               p.points,
+               GREATEST(
+                   COALESCE(
+                       (SELECT SUM(delta)
+                          FROM points_ledger
+                         WHERE user_id = p.user_id),
+                       0
+                   ),
+                   0
+               )
+           )
+     WHERE p.id = %s AND p.status = 'awaiting_confirmation'
+    RETURNING id, user_id, points, comment, charged_points
 """
 
 REJECT_PENALTY = """
@@ -298,7 +346,7 @@ class SkillRepository(Protocol):
         """Возвращает план на дату, создавая его при первом обращении."""
 
     def get_balance(self, user_id: str) -> int:
-        """Текущий баланс баллов."""
+        """Текущий баланс баллов; никогда не бывает отрицательным."""
 
     def list_rewards(self) -> list[Reward]:
         """Активные награды, от дешёвых к дорогим."""
@@ -384,7 +432,7 @@ class SkillRepository(Protocol):
         """Создаёт заявку на штраф; баллы списываются только после подтверждения."""
 
     def confirm_penalty(self, penalty_id: int, *, resolved_by: str = "admin") -> bool:
-        """Подтверждает штраф: списывает баллы и пишет причину в журнал."""
+        """Подтверждает штраф: списывает баллы (не больше остатка) и пишет причину в журнал."""
 
     def reject_penalty(self, penalty_id: int, *, resolved_by: str = "admin") -> bool:
         """Отклоняет заявку на штраф: баллы не меняются."""
@@ -749,7 +797,7 @@ class PostgresSkillRepository:
         plan_date: dt.date,
     ) -> list[Assignment]:
         # Штрафы за прошлые дни начисляются лениво, при первом обращении за день.
-        cursor.execute(APPLY_MISSED_PENALTIES, (user_id, plan_date, user_id))
+        cursor.execute(APPLY_MISSED_PENALTIES, (user_id, user_id, plan_date, user_id))
 
         assignments = self._select_plan(cursor, user_id, plan_date)
         if assignments:
@@ -864,8 +912,13 @@ class PostgresSkillRepository:
         if row is None:
             return False
 
-        _, user_id, points, comment = row
-        cursor.execute(INSERT_PENALTY_LEDGER, (user_id, -points, comment))
+        _, user_id, _, comment, charged_points = row
+        charged = int(charged_points or 0)
+        if charged <= 0:
+            # Списывать нечего: баланс и так 0, журнал не трогаем.
+            return True
+
+        cursor.execute(INSERT_PENALTY_LEDGER, (user_id, -charged, comment))
         ledger_id = int(cursor.fetchone()[0])
         cursor.execute(LINK_PENALTY_LEDGER, (ledger_id, penalty_id))
         return True
@@ -896,6 +949,7 @@ class PostgresSkillRepository:
                 source=row[4],
                 status=row[5],
                 created_at=row[6],
+                charged_points=row[7],
             )
             for row in cursor.fetchall()
         ]

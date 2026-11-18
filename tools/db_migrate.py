@@ -1,7 +1,9 @@
 """Применение миграций из ``sql/*.sql`` по порядку.
 
-    python tools/db_migrate.py                 # применить все миграции
-    python tools/db_migrate.py --hostaddr IP   # обойти неверный DNS
+    python tools/db_migrate.py     # применить все миграции
+
+Подключение берётся только из ``.env`` (``PG_HOST``, ``PG_PORT`` и т.д.):
+если DNS отдаёт неверный адрес, впишите IP прямо в ``PG_HOST``.
 
 Файлы применяются в лексикографическом порядке (001, 002, 003...). Скрипты
 написаны идемпотентно (``IF NOT EXISTS`` / ``IF EXISTS``), поэтому повторный
@@ -10,9 +12,7 @@
 
 from __future__ import annotations
 
-import argparse
 import sys
-from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
 
@@ -56,9 +56,8 @@ def apply_migrations(
 
 
 def main(argv: Iterable[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Применение миграций навыка")
-    parser.add_argument("--hostaddr", help="подключиться по IP (когда DNS врёт)")
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    """Применяет все миграции; параметры подключения берутся только из ``.env``."""
+    del argv  # аргументов нет: конфигурация живёт в .env
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -69,9 +68,6 @@ def main(argv: Iterable[str] | None = None) -> int:
     except ConfigError as error:
         print(f"ОШИБКА конфигурации: {error}")
         return 2
-
-    if args.hostaddr:
-        settings = replace(settings, pg_hostaddr=args.hostaddr)
 
     print(
         f"База: {settings.pg_host}:{settings.pg_port}/{settings.pg_database}, "

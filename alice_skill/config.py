@@ -52,7 +52,6 @@ class Settings:
     pg_password: str
     pg_sslmode: str = DEFAULT_SSLMODE
     pg_connect_timeout: int = DEFAULT_CONNECT_TIMEOUT
-    pg_hostaddr: str | None = None
     penalty_max_points: int = DEFAULT_PENALTY_MAX_POINTS
     penalty_daily_limit: int = DEFAULT_PENALTY_DAILY_LIMIT
 
@@ -61,11 +60,10 @@ class Settings:
         """Параметры для ``psycopg2.connect(**params)``.
 
         Возвращаем kwargs, а не DSN-строку, чтобы не экранировать вручную
-        спецсимволы в пароле. ``hostaddr`` задаётся отдельно: он позволяет
-        подключиться по IP, когда DNS отдаёт неверный адрес, но при этом
-        имя из ``host`` остаётся для проверки сертификата.
+        спецсимволы в пароле. Хост берётся только из ``PG_HOST``: если DNS
+        отдаёт неверный адрес, впишите IP прямо в ``PG_HOST`` в ``.env``.
         """
-        params: dict[str, str | int] = {
+        return {
             "host": self.pg_host,
             "port": self.pg_port,
             "dbname": self.pg_database,
@@ -74,9 +72,6 @@ class Settings:
             "sslmode": self.pg_sslmode,
             "connect_timeout": self.pg_connect_timeout,
         }
-        if self.pg_hostaddr:
-            params["hostaddr"] = self.pg_hostaddr
-        return params
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -103,7 +98,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             DEFAULT_CONNECT_TIMEOUT,
             "PG_CONNECT_TIMEOUT",
         ),
-        pg_hostaddr=(source.get("PG_HOSTADDR") or "").strip() or None,
         penalty_max_points=_as_int(
             source.get("PENALTY_MAX_POINTS"),
             DEFAULT_PENALTY_MAX_POINTS,

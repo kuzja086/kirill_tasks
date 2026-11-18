@@ -28,6 +28,11 @@
 </div>
 
 {% if penalties %}
+<p class="muted">
+  Если баллов не хватает, списывается только остаток — баланс не уходит
+  в минус. В колонке «Баллы» показано фактическое списание, а «из N» —
+  сколько было запрошено.
+</p>
 <table>
   <tr>
     <th>#</th><th>Когда</th><th>Ребёнок</th><th>Баллы</th>
@@ -38,7 +43,9 @@
     <td>{{ penalty.id }}</td>
     <td>{{ penalty.created_at.strftime('%d.%m %H:%M') if penalty.created_at else '' }}</td>
     <td>{{ penalty.user_id }}</td>
-    <td class="negative">−{{ penalty.points }}</td>
+    <td class="negative">
+      {% if penalty.charged_points is not none %}−{{ penalty.charged_points }}{% if penalty.charged_points != penalty.points %} <span class="muted">из {{ penalty.points }}</span>{% endif %}{% else %}−{{ penalty.points }}{% endif %}
+    </td>
     <td>{{ penalty.comment }}</td>
     <td>{{ penalty.source|source }}</td>
     <td>{{ penalty.status|penalty_status }}</td>

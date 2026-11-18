@@ -155,7 +155,12 @@ class RedeemOutcome:
 
 @dataclass(frozen=True)
 class Penalty:
-    """Заявка на штраф."""
+    """Заявка на штраф.
+
+    ``points`` — сколько запрошено, ``charged_points`` — сколько реально
+    списано: баланс не может уйти в минус, поэтому при нехватке баллов
+    списывается только остаток (``None`` — заявка ещё не применена).
+    """
 
     id: int
     user_id: str
@@ -164,6 +169,7 @@ class Penalty:
     source: str
     status: str
     created_at: dt.datetime | None = None
+    charged_points: int | None = None
 
 
 @dataclass(frozen=True)
