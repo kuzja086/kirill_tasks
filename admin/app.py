@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from admin.labels import kind_label, penalty_status_label, reason_label, source_label
+from admin.labels import (
+    WEEKDAY_LABELS,
+    kind_label,
+    penalty_status_label,
+    reason_label,
+    source_label,
+    weekdays_label,
+)
 from alice_skill import economy
 from alice_skill.config import DEFAULT_PENALTY_MAX_POINTS
 from alice_skill.models import (
@@ -56,6 +64,7 @@ def create_app(
     templates.env.filters["penalty_status"] = penalty_status_label
     templates.env.filters["source"] = source_label
     templates.env.filters["kind"] = kind_label
+    templates.env.filters["weekdays"] = weekdays_label
 
     def days_to_earn(cost: int, planned: int) -> str:
         """Сколько дней копить награду; «—», если плана дня ещё нет."""
@@ -257,7 +266,11 @@ def create_app(
             {
                 "tasks": tasks,
                 "kinds": [(kind, kind_label(kind)) for kind in TASK_KINDS],
-                "planned_daily_points": economy.planned_daily_points(tasks),
+                "weekday_options": list(WEEKDAY_LABELS.items()),
+                "planned_daily_points": economy.planned_daily_points(
+                    tasks,
+                    weekday=dt.date.today().isoweekday(),
+                ),
                 "task_max_points": TASK_MAX_POINTS,
                 "message": message,
                 "error": error,
@@ -270,13 +283,14 @@ def create_app(
         title: str = Form(""),
         kind: str = Form(KIND_DAILY),
         points: str = Form(""),
+        weekdays: list[int] | None = Form(None),
     ) -> RedirectResponse:
         redirect = guard(request)
         if redirect is not None:
             return redirect
 
         try:
-            repository.create_task(title, kind, int(points))
+            repository.create_task(title, kind, int(points), weekdays=weekdays)
         except DuplicateTitleError:
             return RedirectResponse("/tasks?error=duplicate", status_code=303)
         except ValueError:
@@ -291,6 +305,7 @@ def create_app(
         kind: str = Form(KIND_DAILY),
         points: str = Form(""),
         is_active: bool = Form(False),
+        weekdays: list[int] | None = Form(None),
     ) -> RedirectResponse:
         redirect = guard(request)
         if redirect is not None:
@@ -303,6 +318,7 @@ def create_app(
                 kind=kind,
                 points=int(points),
                 is_active=is_active,
+                weekdays=weekdays,
             )
         except DuplicateTitleError:
             return RedirectResponse("/tasks?error=duplicate", status_code=303)

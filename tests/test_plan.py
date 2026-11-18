@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import datetime as dt
+
 from alice_skill.plan import build_daily_plan, select_random_tasks
 from factories import make_task
 
 DAILY = [make_task(1, "Зарядка"), make_task(2, "Читать")]
 POOL = [make_task(index, f"Случайная {index}", kind="random") for index in range(3, 13)]
+
+MONDAY = dt.date(2026, 11, 16)
+TUESDAY = dt.date(2026, 11, 17)
+WEDNESDAY = dt.date(2026, 11, 18)
 
 
 def test_selection_is_reproducible_for_same_seed() -> None:
@@ -65,4 +71,39 @@ def test_optional_tasks_never_get_into_daily_plan() -> None:
     )
 
     assert optional.id not in {task.id for task in scheduled}
+    assert len(scheduled) == len(DAILY) + 2
+
+
+def test_weekday_schedule_filters_daily_and_random_tasks() -> None:
+    monday_only = make_task(101, "Вынести мусор", weekdays=(1,))
+    wednesday_only = make_task(102, "Полить цветы", weekdays=(3,))
+    random_monday = make_task(103, "Сдать макулатуру", kind="random", weekdays=(1,))
+
+    def plan(plan_date: dt.date) -> set[int]:
+        return {
+            task.id
+            for task in build_daily_plan(
+                [monday_only, wednesday_only],
+                [random_monday],
+                seed="seed",
+                random_count=5,
+                plan_date=plan_date,
+            )
+        }
+
+    assert plan(MONDAY) == {101, 103}
+    assert plan(WEDNESDAY) == {102}
+    assert plan(TUESDAY) == set()
+
+
+def test_tasks_without_schedule_stay_every_day() -> None:
+    scheduled = build_daily_plan(
+        DAILY,
+        POOL,
+        seed="seed",
+        random_count=2,
+        plan_date=TUESDAY,
+    )
+
+    assert [task.id for task in scheduled[: len(DAILY)]] == [task.id for task in DAILY]
     assert len(scheduled) == len(DAILY) + 2

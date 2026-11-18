@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import hashlib
 from typing import Sequence
 
@@ -38,13 +39,20 @@ def build_daily_plan(
     *,
     seed: str,
     random_count: int = RANDOM_TASKS_PER_DAY,
+    plan_date: dt.date | None = None,
 ) -> tuple[Task, ...]:
     """План дня: ежедневные задачи плюс случайная выборка из пула.
 
     Дополнительные задачи (``kind = 'optional'``) в план не попадают: ребёнок
-    берёт их сам, и за пропуск баллы не списываются. Фильтр стоит здесь,
-    а не только в SQL, чтобы правило нельзя было обойти вызовом из кода.
+    берёт их сам, и за пропуск баллы не списываются. Задачи с расписанием
+    (``weekdays``) участвуют только в свои дни недели. Фильтры стоят здесь,
+    а не только в SQL, чтобы правила нельзя было обойти вызовом из кода.
     """
     daily = tuple(task for task in daily_tasks if task.kind == KIND_DAILY)
     pool = tuple(task for task in random_pool if task.kind == KIND_RANDOM)
+
+    if plan_date is not None:
+        daily = tuple(task for task in daily if task.scheduled_on(plan_date))
+        pool = tuple(task for task in pool if task.scheduled_on(plan_date))
+
     return daily + select_random_tasks(pool, random_count, seed=seed)

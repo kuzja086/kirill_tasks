@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Callable, Protocol, TypeVar, runtime_checkable
+from typing import Callable, Iterable, Protocol, TypeVar, runtime_checkable
 
 import psycopg2.extensions
 
@@ -110,28 +110,32 @@ SELECT_PLAN = """
 """
 
 SELECT_DAILY_TASKS = """
-    SELECT id, title, kind, points
+    SELECT id, title, kind, points, weekdays
       FROM tasks
      WHERE is_active AND kind = 'daily'
+       AND (weekdays IS NULL OR %s::smallint = ANY(weekdays))
      ORDER BY id
 """
 
 SELECT_RANDOM_TASKS = """
-    SELECT id, title, kind, points
+    SELECT id, title, kind, points, weekdays
       FROM tasks
      WHERE is_active AND kind = 'random'
+       AND (weekdays IS NULL OR %s::smallint = ANY(weekdays))
      ORDER BY id
 """
 
+# Дополнительные задачи: без даты — все, с датой — только подходящие по дню.
 SELECT_OPTIONAL_TASKS = """
-    SELECT id, title, kind, points
+    SELECT id, title, kind, points, weekdays
       FROM tasks
      WHERE is_active AND kind = 'optional'
+       AND (%s::smallint IS NULL OR weekdays IS NULL OR %s::smallint = ANY(weekdays))
      ORDER BY id
 """
 
 SELECT_ALL_TASKS = """
-    SELECT id, title, kind, points, is_active
+    SELECT id, title, kind, points, is_active, weekdays
       FROM tasks
      ORDER BY CASE kind WHEN 'daily' THEN 0 WHEN 'random' THEN 1 ELSE 2 END,
               lower(title),
@@ -139,16 +143,16 @@ SELECT_ALL_TASKS = """
 """
 
 INSERT_TASK = """
-    INSERT INTO tasks (title, kind, points)
-    VALUES (%s, %s, %s)
-    RETURNING id, title, kind, points, is_active
+    INSERT INTO tasks (title, kind, points, weekdays)
+    VALUES (%s, %s, %s, %s)
+    RETURNING id, title, kind, points, is_active, weekdays
 """
 
 UPDATE_TASK = """
     UPDATE tasks
-       SET title = %s, kind = %s, points = %s, is_active = %s
+       SET title = %s, kind = %s, points = %s, is_active = %s, weekdays = %s
      WHERE id = %s
-    RETURNING id, title, kind, points, is_active
+    RETURNING id, title, kind, points, is_active, weekdays
 """
 
 # Дополнительная задача: assignment создаётся сразу «ждёт подтверждения»,
@@ -373,11 +377,21 @@ class SkillRepository(Protocol):
     def list_tasks(self) -> list[Task]:
         """Весь справочник задач, включая выключенные (для админки)."""
 
-    def list_optional_tasks(self) -> list[Task]:
-        """Дополнительные задачи: доступны по желанию, без штрафа за пропуск."""
+    def list_optional_tasks(self, plan_date: dt.date | None = None) -> list[Task]:
+        """Дополнительные задачи: по желанию, без штрафа за пропуск.
 
-    def create_task(self, title: str, kind: str, points: int) -> Task:
-        """Добавляет задачу.
+        Если передана дата, учитывается расписание по дням недели.
+        """
+
+    def create_task(
+        self,
+        title: str,
+        kind: str,
+        points: int,
+        *,
+        weekdays: Iterable[int] | None = None,
+    ) -> Task:
+        """Добавляет задачу; ``weekdays`` — дни недели, пусто — каждый день.
 
         :raises ValueError: если данные не проходят проверку.
         :raises DuplicateTitleError: если такая задача уже есть.
@@ -391,8 +405,9 @@ class SkillRepository(Protocol):
         kind: str,
         points: int,
         is_active: bool,
+        weekdays: Iterable[int] | None = None,
     ) -> Task | None:
-        """Меняет название, вид, стоимость и видимость задачи.
+        """Меняет название, вид, стоимость, видимость и дни недели задачи.
 
         Возвращает ``None``, если задачи с таким id нет.
         """
@@ -496,11 +511,25 @@ class PostgresSkillRepository:
     def list_tasks(self) -> list[Task]:
         return self._run(self._select_all_tasks)
 
-    def list_optional_tasks(self) -> list[Task]:
-        return self._run(lambda cursor: self._select_tasks(cursor, SELECT_OPTIONAL_TASKS))
+    def list_optional_tasks(self, plan_date: dt.date | None = None) -> list[Task]:
+        weekday = plan_date.isoweekday() if plan_date is not None else None
+        return self._run(
+            lambda cursor: self._select_tasks(
+                cursor,
+                SELECT_OPTIONAL_TASKS,
+                (weekday, weekday),
+            )
+        )
 
-    def create_task(self, title: str, kind: str, points: int) -> Task:
-        cleaned = validate_task_input(title, kind, points)
+    def create_task(
+        self,
+        title: str,
+        kind: str,
+        points: int,
+        *,
+        weekdays: Iterable[int] | None = None,
+    ) -> Task:
+        cleaned = validate_task_input(title, kind, points, weekdays)
         try:
             return self._run(lambda cursor: self._insert_task(cursor, *cleaned))
         except psycopg2.errors.UniqueViolation as error:
@@ -514,8 +543,11 @@ class PostgresSkillRepository:
         kind: str,
         points: int,
         is_active: bool,
+        weekdays: Iterable[int] | None = None,
     ) -> Task | None:
-        cleaned_title, cleaned_kind, cleaned_points = validate_task_input(title, kind, points)
+        cleaned_title, cleaned_kind, cleaned_points, cleaned_weekdays = validate_task_input(
+            title, kind, points, weekdays
+        )
         try:
             return self._run(
                 lambda cursor: self._update_task(
@@ -525,6 +557,7 @@ class PostgresSkillRepository:
                     cleaned_kind,
                     cleaned_points,
                     bool(is_active),
+                    cleaned_weekdays,
                 )
             )
         except psycopg2.errors.UniqueViolation as error:
@@ -714,6 +747,7 @@ class PostgresSkillRepository:
                 kind=row[2],
                 points=row[3],
                 is_active=row[4],
+                weekdays=tuple(row[5] or ()),
             )
             for row in cursor.fetchall()
         ]
@@ -724,10 +758,11 @@ class PostgresSkillRepository:
         title: str,
         kind: str,
         points: int,
+        weekdays: tuple[int, ...],
     ) -> Task:
-        cursor.execute(INSERT_TASK, (title, kind, points))
+        cursor.execute(INSERT_TASK, (title, kind, points, list(weekdays)))
         row = cursor.fetchone()
-        return Task(id=row[0], title=row[1], kind=row[2], points=row[3], is_active=row[4])
+        return self._task_from_row(row)
 
     def _update_task(
         self,
@@ -737,21 +772,43 @@ class PostgresSkillRepository:
         kind: str,
         points: int,
         is_active: bool,
+        weekdays: tuple[int, ...],
     ) -> Task | None:
-        cursor.execute(UPDATE_TASK, (title, kind, points, is_active, task_id))
+        cursor.execute(
+            UPDATE_TASK,
+            (title, kind, points, is_active, list(weekdays), task_id),
+        )
         row = cursor.fetchone()
         if row is None:
             return None
-        return Task(id=row[0], title=row[1], kind=row[2], points=row[3], is_active=row[4])
+        return self._task_from_row(row)
+
+    @staticmethod
+    def _task_from_row(row: tuple) -> Task:
+        return Task(
+            id=row[0],
+            title=row[1],
+            kind=row[2],
+            points=row[3],
+            is_active=row[4],
+            weekdays=tuple(row[5] or ()),
+        )
 
     def _select_tasks(
         self,
         cursor: psycopg2.extensions.cursor,
         query: str,
+        params: tuple = (),
     ) -> list[Task]:
-        cursor.execute(query)
+        cursor.execute(query, params)
         return [
-            Task(id=row[0], title=row[1], kind=row[2], points=row[3])
+            Task(
+                id=row[0],
+                title=row[1],
+                kind=row[2],
+                points=row[3],
+                weekdays=tuple(row[4] or ()),
+            )
             for row in cursor.fetchall()
         ]
 
@@ -788,13 +845,15 @@ class PostgresSkillRepository:
         if assignments:
             return assignments
 
-        daily_tasks = self._select_tasks(cursor, SELECT_DAILY_TASKS)
-        random_pool = self._select_tasks(cursor, SELECT_RANDOM_TASKS)
+        weekday = plan_date.isoweekday()
+        daily_tasks = self._select_tasks(cursor, SELECT_DAILY_TASKS, (weekday,))
+        random_pool = self._select_tasks(cursor, SELECT_RANDOM_TASKS, (weekday,))
         scheduled = plan.build_daily_plan(
             daily_tasks,
             random_pool,
             seed=f"{user_id}:{plan_date.isoformat()}",
             random_count=economy.RANDOM_TASKS_PER_DAY,
+            plan_date=plan_date,
         )
         for task in scheduled:
             cursor.execute(

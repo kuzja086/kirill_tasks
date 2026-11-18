@@ -44,8 +44,16 @@ def make_task(
     kind: str = KIND_DAILY,
     points: int = 10,
     is_active: bool = True,
+    weekdays: tuple[int, ...] = (),
 ) -> Task:
-    return Task(id=task_id, title=title, kind=kind, points=points, is_active=is_active)
+    return Task(
+        id=task_id,
+        title=title,
+        kind=kind,
+        points=points,
+        is_active=is_active,
+        weekdays=weekdays,
+    )
 
 
 def make_assignment(
@@ -207,15 +215,26 @@ class FakeSkillRepository:
     def list_tasks(self) -> list[Task]:
         return list(self.tasks)
 
-    def list_optional_tasks(self) -> list[Task]:
+    def list_optional_tasks(self, plan_date: Any = None) -> list[Task]:
         return [
             task
             for task in self.tasks
-            if task.kind == KIND_OPTIONAL and task.is_active
+            if task.kind == KIND_OPTIONAL
+            and task.is_active
+            and (plan_date is None or task.scheduled_on(plan_date))
         ]
 
-    def create_task(self, title: str, kind: str, points: int) -> Task:
-        cleaned_title, cleaned_kind, cleaned_points = validate_task_input(title, kind, points)
+    def create_task(
+        self,
+        title: str,
+        kind: str,
+        points: int,
+        *,
+        weekdays: Any = None,
+    ) -> Task:
+        cleaned_title, cleaned_kind, cleaned_points, cleaned_weekdays = validate_task_input(
+            title, kind, points, weekdays
+        )
         if any(
             task.kind == cleaned_kind and task.title.lower() == cleaned_title.lower()
             for task in self.tasks
@@ -226,6 +245,7 @@ class FakeSkillRepository:
             title=cleaned_title,
             kind=cleaned_kind,
             points=cleaned_points,
+            weekdays=cleaned_weekdays,
         )
         self._next_task_id += 1
         self.tasks.append(task)
@@ -239,8 +259,11 @@ class FakeSkillRepository:
         kind: str,
         points: int,
         is_active: bool,
+        weekdays: Any = None,
     ) -> Task | None:
-        cleaned_title, cleaned_kind, cleaned_points = validate_task_input(title, kind, points)
+        cleaned_title, cleaned_kind, cleaned_points, cleaned_weekdays = validate_task_input(
+            title, kind, points, weekdays
+        )
         if any(
             task.id != task_id
             and task.kind == cleaned_kind
@@ -257,6 +280,7 @@ class FakeSkillRepository:
                 kind=cleaned_kind,
                 points=cleaned_points,
                 is_active=is_active,
+                weekdays=cleaned_weekdays,
             )
             self.tasks[index] = updated
             return updated

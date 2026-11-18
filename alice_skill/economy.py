@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from alice_skill.models import KIND_DAILY, KIND_RANDOM, Task
+from alice_skill.models import KIND_DAILY, KIND_RANDOM, WEEKDAYS, Task
 
 # Через сколько дней ребёнок должен зарабатывать награду.
 REWARD_INTERVAL_DAYS = 7
@@ -78,10 +78,29 @@ def planned_daily_points(
     tasks: Sequence[Task],
     *,
     random_count: int = RANDOM_TASKS_PER_DAY,
+    weekday: int | None = None,
 ) -> int:
-    """Плановые баллы дня по справочнику: ежедневные задачи плюс ожидание случайных."""
-    daily = sum(task.points for task in tasks if task.kind == KIND_DAILY and task.is_active)
-    pool = [task.points for task in tasks if task.kind == KIND_RANDOM and task.is_active]
+    """Плановые баллы дня по справочнику: ежедневные задачи плюс ожидание случайных.
+
+    :param weekday: день недели (1 = Пн ... 7 = Вс); ``None`` — считать все
+        задачи, без учёта расписания.
+    """
+    if weekday is not None and weekday not in WEEKDAYS:
+        raise ValueError("weekday должен быть в диапазоне 1..7")
+
+    def fits(task: Task) -> bool:
+        return weekday is None or task.scheduled_on_weekday(weekday)
+
+    daily = sum(
+        task.points
+        for task in tasks
+        if task.kind == KIND_DAILY and task.is_active and fits(task)
+    )
+    pool = [
+        task.points
+        for task in tasks
+        if task.kind == KIND_RANDOM and task.is_active and fits(task)
+    ]
     return expected_daily_points(daily, pool, random_count=random_count)
 
 

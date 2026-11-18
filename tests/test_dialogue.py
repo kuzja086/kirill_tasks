@@ -379,6 +379,28 @@ def test_list_tasks_without_plan_still_offers_optional_tasks(alice_event) -> Non
     assert "Полить цветы" in response.text
 
 
+def test_optional_task_on_another_weekday_is_not_offered(alice_event) -> None:
+    repository = FakeSkillRepository(
+        tasks=[make_task(31, "Вынести мусор", kind="optional", points=1, weekdays=(1,))]
+    )
+    request = _request(alice_event, "какие задачи на сегодня", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)  # воскресенье
+
+    assert "Вынести мусор" not in response.text
+
+
+def test_optional_task_is_offered_on_its_weekday(alice_event) -> None:
+    repository = FakeSkillRepository(
+        tasks=[make_task(31, "Вынести мусор", kind="optional", points=1, weekdays=(7,))]
+    )
+    request = _request(alice_event, "какие задачи на сегодня", intent=dialogue.INTENT_LIST_TASKS)
+
+    response = respond(request, repository, TODAY)  # воскресенье
+
+    assert "Вынести мусор" in response.text
+
+
 def test_task_done_for_optional_task_creates_request_without_penalty(alice_event) -> None:
     repository = FakeSkillRepository(tasks=OPTIONAL_TASKS, balance=10)
     request = _request(alice_event, "я полил цветы", intent=dialogue.INTENT_TASK_DONE)

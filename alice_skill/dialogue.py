@@ -140,7 +140,11 @@ def respond(
         balance = repository.get_balance(request.user_id)
 
         if intent == INTENT_LIST_TASKS:
-            return _list_tasks(assignments, balance, repository.list_optional_tasks())
+            return _list_tasks(
+                assignments,
+                balance,
+                repository.list_optional_tasks(today),
+            )
         if intent == INTENT_MY_POINTS:
             return _my_points(repository, request.user_id, balance)
         if intent == INTENT_MY_GOAL:
@@ -345,7 +349,7 @@ def _task_done(
             return AliceResponse(text=f"«{assignment.title}» уже отмечена пропущенной.")
         return AliceResponse(text="Не получилось отметить задачу. Попробуй ещё раз.")
 
-    optional = repository.list_optional_tasks()
+    optional = repository.list_optional_tasks(today)
     optional_match = matching.find_match([task.title for task in optional], phrase)
     if optional_match is None:
         known = "; ".join(

@@ -63,6 +63,24 @@ def test_planned_daily_points_uses_active_tasks_only() -> None:
     assert planned_daily_points(tasks, random_count=1) == 5
 
 
+def test_planned_daily_points_respects_weekday_schedule() -> None:
+    tasks = [
+        make_task(1, "Каждый день", points=3),
+        make_task(2, "Только вторник", points=5, weekdays=(2,)),
+        make_task(3, "Случайная по средам", kind="random", points=2, weekdays=(3,)),
+    ]
+
+    assert planned_daily_points(tasks, random_count=1, weekday=1) == 3
+    assert planned_daily_points(tasks, random_count=1, weekday=2) == 8
+    assert planned_daily_points(tasks, random_count=1, weekday=3) == 5
+
+
+@pytest.mark.parametrize("weekday", [0, 8])
+def test_planned_daily_points_rejects_bad_weekday(weekday: int) -> None:
+    with pytest.raises(ValueError):
+        planned_daily_points([], weekday=weekday)
+
+
 def test_realistic_daily_points_applies_completion_rate() -> None:
     assert realistic_daily_points(13) == 10
     assert realistic_daily_points(1) == 1, "минимум один балл в день"

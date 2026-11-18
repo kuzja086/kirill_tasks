@@ -143,6 +143,11 @@
       `CREATE_MISSED_PENALTIES` смотрят только на обязательные).
       Выполнение — фразой «я полил цветы»: заявка создаётся сразу
       в `awaiting_confirmation`.
+- [x] **Расписание по дням недели**: `tasks.weekdays` (ISO 1–7, пусто —
+      каждый день), миграция `sql/008_weekdays.sql`; выборки плана и
+      дополнительных задач фильтруют по дате, админка `/tasks` показывает
+      чекбоксы Пн–Вс, `build_daily_plan` и `planned_daily_points` учитывают
+      день недели.
 - [x] **Репозиторий**: `list_tasks()`, `create_task()`, `update_task()`,
       `list_optional_tasks()`, `claim_optional_task()`, `list_all_rewards()`,
       `create_reward()`, `update_reward()`. Дубликат названия — исключение
@@ -214,7 +219,7 @@
 
 ## Качество кода и тесты
 
-- [x] 271 тест: домен, диалог на fake-репозитории, SQL-слой на fake-базе,
+- [x] 289 тестов: домен, диалог на fake-репозитории, SQL-слой на fake-базе,
       handler, песочница, миграции, админка (TestClient).
 - [ ] **CI (GitHub Actions)**: `pytest` на push/PR.
 - [ ] **Интеграционный тест на реальном Postgres в CI** (сервис-контейнер,

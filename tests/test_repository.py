@@ -181,9 +181,9 @@ def test_ensure_daily_plan_creates_daily_and_random_tasks() -> None:
         {
             CREATE_MISSED_PENALTIES: [[]],
             SELECT_PLAN: [[], [(11, "Зарядка", "daily", 10, "pending")]],
-            SELECT_DAILY_TASKS: [[(1, "Зарядка", "daily", 10)]],
+            SELECT_DAILY_TASKS: [[(1, "Зарядка", "daily", 10, None)]],
             SELECT_RANDOM_TASKS: [
-                [(2, "Погулять", "random", 15), (3, "Поделка", "random", 15)]
+                [(2, "Погулять", "random", 15, None), (3, "Поделка", "random", 15, None)]
             ],
         }
     )
@@ -193,6 +193,9 @@ def test_ensure_daily_plan_creates_daily_and_random_tasks() -> None:
     assert assignments == [
         Assignment(id=11, title="Зарядка", points=10, status="pending", kind="daily")
     ]
+    weekday = (TODAY.isoweekday(),)
+    assert _executed(database, SELECT_DAILY_TASKS) == [weekday]
+    assert _executed(database, SELECT_RANDOM_TASKS) == [weekday]
     inserts = _executed(database, INSERT_ASSIGNMENT)
     assert len(inserts) == 1 + economy.RANDOM_TASKS_PER_DAY
     assert inserts[0] == ("user-1", TODAY, 1, "Зарядка", "daily", 10)
@@ -487,8 +490,8 @@ def test_list_tasks_includes_inactive_tasks() -> None:
         {
             SELECT_ALL_TASKS: [
                 [
-                    (1, "Зарядка", "daily", 10, True),
-                    (2, "Помыть посуду", "optional", 5, False),
+                    (1, "Зарядка", "daily", 10, True, None),
+                    (2, "Помыть посуду", "optional", 5, False, [1, 3]),
                 ]
             ]
         }
@@ -498,26 +501,65 @@ def test_list_tasks_includes_inactive_tasks() -> None:
 
     assert tasks == [
         Task(id=1, title="Зарядка", kind="daily", points=10),
-        Task(id=2, title="Помыть посуду", kind="optional", points=5, is_active=False),
+        Task(
+            id=2,
+            title="Помыть посуду",
+            kind="optional",
+            points=5,
+            is_active=False,
+            weekdays=(1, 3),
+        ),
     ]
 
 
 def test_list_optional_tasks_uses_optional_query() -> None:
-    database = FakeDatabase({SELECT_OPTIONAL_TASKS: [[(7, "Полить цветы", "optional", 5)]]})
+    database = FakeDatabase(
+        {SELECT_OPTIONAL_TASKS: [[(7, "Полить цветы", "optional", 5, [2])]]}
+    )
 
     tasks = _repository(database).list_optional_tasks()
 
-    assert tasks == [Task(id=7, title="Полить цветы", kind="optional", points=5)]
-    assert _executed(database, SELECT_OPTIONAL_TASKS) == [None]
+    assert tasks == [
+        Task(id=7, title="Полить цветы", kind="optional", points=5, weekdays=(2,))
+    ]
+    assert _executed(database, SELECT_OPTIONAL_TASKS) == [(None, None)]
+
+
+def test_list_optional_tasks_filters_by_weekday() -> None:
+    database = FakeDatabase({SELECT_OPTIONAL_TASKS: [[]]})
+
+    _repository(database).list_optional_tasks(TODAY)
+
+    assert _executed(database, SELECT_OPTIONAL_TASKS) == [
+        (TODAY.isoweekday(), TODAY.isoweekday())
+    ]
 
 
 def test_create_task_normalizes_title_and_returns_row() -> None:
-    database = FakeDatabase({INSERT_TASK: [[(5, "Помыть посуду", "daily", 10, True)]]})
+    database = FakeDatabase(
+        {INSERT_TASK: [[(5, "Помыть посуду", "daily", 10, True, None)]]}
+    )
 
     task = _repository(database).create_task("  Помыть   посуду ", "daily", 10)
 
     assert task == Task(id=5, title="Помыть посуду", kind="daily", points=10)
-    assert _executed(database, INSERT_TASK) == [("Помыть посуду", "daily", 10)]
+    assert _executed(database, INSERT_TASK) == [("Помыть посуду", "daily", 10, [])]
+
+
+def test_create_task_saves_weekdays() -> None:
+    database = FakeDatabase(
+        {INSERT_TASK: [[(5, "Полить цветы", "daily", 1, True, [1, 3])]]}
+    )
+
+    task = _repository(database).create_task(
+        "Полить цветы",
+        "daily",
+        1,
+        weekdays=(3, 1, 1),
+    )
+
+    assert task.weekdays == (1, 3)
+    assert _executed(database, INSERT_TASK) == [("Полить цветы", "daily", 1, [1, 3])]
 
 
 def test_create_task_rejects_duplicate_title() -> None:
@@ -557,7 +599,33 @@ def test_update_task_returns_none_for_unknown_id() -> None:
     )
 
     assert updated is None
-    assert _executed(database, UPDATE_TASK) == [("Зарядка", "daily", 10, False, 99)]
+    assert _executed(database, UPDATE_TASK) == [("Зарядка", "daily", 10, False, [], 99)]
+
+
+def test_update_task_changes_weekdays() -> None:
+    database = FakeDatabase(
+        {UPDATE_TASK: [[(1, "Зарядка", "daily", 10, True, [2, 4])]]}
+    )
+
+    updated = _repository(database).update_task(
+        1,
+        title="Зарядка",
+        kind="daily",
+        points=10,
+        is_active=True,
+        weekdays=[4, 2],
+    )
+
+    assert updated == Task(
+        id=1,
+        title="Зарядка",
+        kind="daily",
+        points=10,
+        weekdays=(2, 4),
+    )
+    assert _executed(database, UPDATE_TASK) == [
+        ("Зарядка", "daily", 10, True, [2, 4], 1)
+    ]
 
 
 def test_claim_optional_task_creates_assignment() -> None:
@@ -604,6 +672,12 @@ def test_deductions_are_capped_by_balance_in_sql() -> None:
     # Баланс не может уйти в минус: каждое списание ограничено остатком.
     assert "LEAST(r.points, GREATEST(COALESCE(b.amount, 0), 0))" in REJECT_ASSIGNMENT
     assert "charged_points = LEAST(" in CONFIRM_PENALTY
+
+
+def test_weekday_schedule_is_filtered_in_sql() -> None:
+    # Расписание по дням недели учитывается уже в выборке задач для плана.
+    for query in (SELECT_DAILY_TASKS, SELECT_RANDOM_TASKS, SELECT_OPTIONAL_TASKS):
+        assert "ANY(weekdays)" in query
 
 
 def test_list_all_rewards_includes_inactive() -> None:

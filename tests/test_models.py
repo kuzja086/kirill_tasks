@@ -120,7 +120,19 @@ def test_validate_task_input_normalizes_title_and_points() -> None:
         "Помыть посуду",
         "daily",
         10,
+        (),
     )
+
+
+def test_validate_task_input_normalizes_weekdays() -> None:
+    assert validate_task_input("Полить цветы", "daily", 1, [5, 1, 3, 1]) == (
+        "Полить цветы",
+        "daily",
+        1,
+        (1, 3, 5),
+    )
+    assert validate_task_input("Полить цветы", "daily", 1, None)[3] == ()
+    assert validate_task_input("Полить цветы", "daily", 1, "2,4")[3] == (2, 4)
 
 
 @pytest.mark.parametrize(
@@ -141,6 +153,12 @@ def test_validate_task_input_normalizes_title_and_points() -> None:
 def test_validate_task_input_rejects_bad_values(title: str, kind: str, points: object) -> None:
     with pytest.raises(ValueError):
         validate_task_input(title, kind, points)
+
+
+@pytest.mark.parametrize("weekdays", [[0], [8], ["abc"], [1.5]])
+def test_validate_task_input_rejects_bad_weekdays(weekdays: object) -> None:
+    with pytest.raises(ValueError):
+        validate_task_input("Задача", "daily", 1, weekdays)
 
 
 def test_validate_reward_input_normalizes_title() -> None:

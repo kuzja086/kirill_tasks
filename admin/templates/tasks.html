@@ -5,7 +5,7 @@
 {% if message == 'created' %}<p class="ok">Задача добавлена.</p>{% endif %}
 {% if message == 'updated' %}<p class="ok">Изменения сохранены.</p>{% endif %}
 {% if error == 'duplicate' %}<p class="error">Такая задача уже есть: название и вид должны быть уникальны.</p>{% endif %}
-{% if error == 'invalid' %}<p class="error">Проверьте поля: название не пустое (до 60 символов), баллы — целое число от 1 до {{ task_max_points }}.</p>{% endif %}
+{% if error == 'invalid' %}<p class="error">Проверьте поля: название не пустое (до 60 символов), баллы — целое число от 1 до {{ task_max_points }}, дни недели — только из списка Пн–Вс.</p>{% endif %}
 {% if error == 'missing' %}<p class="error">Задача не найдена.</p>{% endif %}
 
 <div class="card">
@@ -16,23 +16,29 @@
       {% for value, label in kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
     </select>
     <input name="points" type="number" min="1" max="{{ task_max_points }}" step="1" placeholder="баллы" required>
+    <span class="muted">Дни:</span>
+    {% for value, label in weekday_options %}
+    <label class="muted"><input type="checkbox" name="weekdays" value="{{ value }}"> {{ label }}</label>
+    {% endfor %}
     <button type="submit">Добавить</button>
   </form>
   <p class="muted">
     Ежедневные и случайные задачи попадают в план дня. Дополнительные —
     по желанию: за пропуск баллы не списываются.
     {% if planned_daily_points %}
-    План дня сейчас — {{ planned_daily_points }} баллов: ежедневные задачи
-    плюс две случайные. Держите сумму ежедневных около 10 — так ребёнку
-    легко считать.
+    План дня на сегодня — {{ planned_daily_points }} баллов: задачи по расписанию
+    на этот день недели плюс две случайные. Держите сумму ежедневных около 10 —
+    так ребёнку легко считать.
     {% endif %}
+    Ничего не отмечено в «Днях» — задача каждый день. Для дополнительных задач
+    расписание тоже действует: Алиса предложит их только в выбранные дни.
   </p>
 </div>
 
 {% if tasks %}
 <table>
   <tr>
-    <th>#</th><th>Название</th><th>Вид</th><th>Баллы</th><th>Доля дня</th><th>Включена</th><th></th>
+    <th>#</th><th>Название</th><th>Вид</th><th>Дни</th><th>Баллы</th><th>Доля дня</th><th>Включена</th><th></th>
   </tr>
   {% for task in tasks %}
   <tr>
@@ -47,6 +53,15 @@
         <option value="{{ value }}" {% if value == task.kind %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
+    </td>
+    <td>
+      {% for value, label in weekday_options %}
+      <label class="muted" style="margin-right: 4px">
+        <input form="task-{{ task.id }}" type="checkbox" name="weekdays" value="{{ value }}"
+               {% if value in task.weekdays %}checked{% endif %}> {{ label }}
+      </label>
+      {% endfor %}
+      <div class="muted">{{ task.weekdays|weekdays }}</div>
     </td>
     <td>
       <input form="task-{{ task.id }}" name="points" type="number" min="1" max="{{ task_max_points }}"
@@ -70,7 +85,8 @@
 <p class="muted">
   «Доля дня» — сколько процентов планового дня приносит задача.
   Снимите «Включена», чтобы убрать задачу из плана без удаления истории.
-  Стоимость сохраняется в назначенных задачах на день — прошлые дни не меняются.
+  Стоимость и расписание сохраняются в назначенных задачах на день —
+  прошлые дни не меняются.
 </p>
 {% else %}
 <p class="muted">Задач пока нет — добавьте первую выше.</p>

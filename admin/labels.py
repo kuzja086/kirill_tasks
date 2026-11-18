@@ -29,6 +29,17 @@ KIND_LABELS = {
     "optional": "дополнительная",
 }
 
+# 1 = понедельник ... 7 = воскресенье (ISO).
+WEEKDAY_LABELS = {
+    1: "Пн",
+    2: "Вт",
+    3: "Ср",
+    4: "Чт",
+    5: "Пт",
+    6: "Сб",
+    7: "Вс",
+}
+
 
 def reason_label(reason: str) -> str:
     return REASON_LABELS.get(reason, reason)
@@ -44,3 +55,11 @@ def source_label(source: str) -> str:
 
 def kind_label(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)
+
+
+def weekdays_label(values: object) -> str:
+    """«каждый день» или «Пн, Ср» для набора дней недели."""
+    days = list(values or ())
+    if not days:
+        return "каждый день"
+    return ", ".join(WEEKDAY_LABELS.get(int(day), str(day)) for day in days)

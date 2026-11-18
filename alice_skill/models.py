@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from alice_skill.config import PROTOCOL_VERSION
 
@@ -23,6 +23,10 @@ TASK_MIN_POINTS = 1
 TASK_MAX_POINTS = 10
 REWARD_MIN_COST = 1
 REWARD_MAX_COST = 100000
+
+# Дни недели в ISO-нумерации: 1 — понедельник, 7 — воскресенье.
+# Пустой набор означает «каждый день».
+WEEKDAYS = (1, 2, 3, 4, 5, 6, 7)
 
 # Статусы задачи в дневном плане.
 STATUS_PENDING = "pending"
@@ -78,11 +82,38 @@ def _as_whole_number(value: Any, *, minimum: int, maximum: int, label: str) -> i
     return number
 
 
-def validate_task_input(title: str, kind: str, points: Any) -> tuple[str, str, int]:
+def _as_weekdays(value: Any) -> tuple[int, ...]:
+    """Нормализует дни недели: ``None``/пусто — каждый день, иначе 1..7."""
+    if value is None:
+        return ()
+
+    if isinstance(value, str):
+        items: list[Any] = [item for item in value.replace(" ", "").split(",") if item]
+    elif isinstance(value, int):
+        items = [value]
+    else:
+        items = list(value)
+
+    days = {
+        _as_whole_number(item, minimum=1, maximum=7, label="День недели")
+        for item in items
+        if item != ""
+    }
+    return tuple(sorted(days))
+
+
+def validate_task_input(
+    title: str,
+    kind: str,
+    points: Any,
+    weekdays: Iterable[Any] | None = None,
+) -> tuple[str, str, int, tuple[int, ...]]:
     """Проверяет данные задачи из админки.
 
+    :param weekdays: дни недели (1 = Пн ... 7 = Вс); пусто — каждый день.
     :raises ValueError: если название пустое или длинное, вид неизвестен,
-        а баллы не целое число из допустимого диапазона.
+        баллы не целое число из допустимого диапазона или день недели
+        не входит в 1..7.
     """
     cleaned_title = clean_title(title)
     if kind not in TASK_KINDS:
@@ -93,7 +124,7 @@ def validate_task_input(title: str, kind: str, points: Any) -> tuple[str, str, i
         maximum=TASK_MAX_POINTS,
         label="Баллы",
     )
-    return cleaned_title, kind, cleaned_points
+    return cleaned_title, kind, cleaned_points, _as_weekdays(weekdays)
 
 
 def validate_reward_input(title: str, cost: Any) -> tuple[str, int]:
@@ -114,13 +145,26 @@ def validate_reward_input(title: str, cost: Any) -> tuple[str, int]:
 
 @dataclass(frozen=True)
 class Task:
-    """Задача из справочника."""
+    """Задача из справочника.
+
+    ``weekdays`` — дни недели, когда задача попадает в план (1 = Пн ... 7 = Вс).
+    Пустой набор означает «каждый день».
+    """
 
     id: int
     title: str
     kind: str
     points: int
     is_active: bool = True
+    weekdays: tuple[int, ...] = ()
+
+    def scheduled_on_weekday(self, weekday: int) -> bool:
+        """Попадает ли задача в план на этот день недели (1 = Пн ... 7 = Вс)."""
+        return not self.weekdays or weekday in self.weekdays
+
+    def scheduled_on(self, day: dt.date) -> bool:
+        """Попадает ли задача в план на этот день."""
+        return self.scheduled_on_weekday(day.isoweekday())
 
 
 @dataclass(frozen=True)

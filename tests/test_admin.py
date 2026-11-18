@@ -268,6 +268,49 @@ def test_task_can_be_created_from_admin() -> None:
     assert repository.tasks[0].title == "Полить цветы"
     assert repository.tasks[0].kind == "optional"
     assert repository.tasks[0].points == 5
+    assert repository.tasks[0].weekdays == ()
+
+
+def test_task_can_be_created_with_weekdays() -> None:
+    repository = FakeSkillRepository()
+    client = _client(repository)
+    _login(client)
+
+    response = client.post(
+        "/tasks",
+        data={
+            "title": "Вынести мусор",
+            "kind": "daily",
+            "points": "1",
+            "weekdays": ["1", "3"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=created")
+    assert repository.tasks[0].weekdays == (1, 3)
+
+    page = client.get("/tasks")
+    assert "Пн, Ср" in page.text
+
+
+def test_task_weekdays_can_be_cleared() -> None:
+    repository = FakeSkillRepository(
+        tasks=[make_task(1, "Вынести мусор", points=1, weekdays=(1, 3))]
+    )
+    client = _client(repository)
+    _login(client)
+
+    response = client.post(
+        "/tasks/1",
+        data={"title": "Вынести мусор", "kind": "daily", "points": "1", "is_active": "true"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("message=updated")
+    assert repository.tasks[0].weekdays == ()
 
 
 def test_task_with_duplicate_title_is_rejected() -> None:
@@ -347,7 +390,7 @@ def test_tasks_page_shows_planned_day_and_share() -> None:
 
     page = client.get("/tasks")
 
-    assert "План дня сейчас — 13 баллов" in page.text
+    assert "План дня на сегодня — 13 баллов" in page.text
     assert "77%" in page.text
 
 
