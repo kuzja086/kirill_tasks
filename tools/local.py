@@ -34,6 +34,7 @@ from alice_skill.config import load_settings  # noqa: E402
 from alice_skill.db import Database  # noqa: E402
 from alice_skill.models import STATUS_AWAITING_CONFIRMATION, AliceRequest  # noqa: E402
 from alice_skill.repository import PostgresSkillRepository  # noqa: E402
+from alice_skill.timeutil import today_in_skill_timezone  # noqa: E402
 
 DEFAULT_USER = "local-user"
 
@@ -68,7 +69,7 @@ def load_env_from_file(path: Path) -> None:
 def build_event(phrase: str, *, user_id: str) -> dict[str, Any]:
     """Событие в формате Яндекс.Диалогов: интент определяется по фразе."""
     return {
-        "meta": {"locale": "ru-RU", "timezone": "Europe/Moscow"},
+        "meta": {"locale": "ru-RU", "timezone": "Asia/Yekaterinburg"},
         "session": {
             "message_id": 1,
             "session_id": "local-session",
@@ -127,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
 
     load_env_from_file(ROOT / ".env")
     repository = PostgresSkillRepository(load_settings())
-    today = dt.date.today()
+    today = today_in_skill_timezone()
 
     try:
         if args.command == "ask":

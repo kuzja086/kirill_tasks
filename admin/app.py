@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +35,7 @@ from alice_skill.models import (
 )
 from alice_skill.repository import DuplicateTitleError, SkillRepository
 from alice_skill.text import format_points
+from alice_skill.timeutil import today_in_skill_timezone
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -269,7 +269,7 @@ def create_app(
                 "weekday_options": list(WEEKDAY_LABELS.items()),
                 "planned_daily_points": economy.planned_daily_points(
                     tasks,
-                    weekday=dt.date.today().isoweekday(),
+                    weekday=today_in_skill_timezone().isoweekday(),
                 ),
                 "task_max_points": TASK_MAX_POINTS,
                 "message": message,

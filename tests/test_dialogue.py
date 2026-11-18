@@ -208,6 +208,13 @@ def test_today_in_skill_timezone_is_date() -> None:
     assert isinstance(dialogue.today_in_skill_timezone(), dt.date)
 
 
+def test_skill_timezone_is_yekaterinburg() -> None:
+    assert dialogue.SKILL_TIMEZONE.utcoffset(None) == dt.timedelta(hours=5)
+    assert dt.datetime(2026, 11, 18, 23, 30, tzinfo=dt.timezone.utc).astimezone(
+        dialogue.SKILL_TIMEZONE
+    ).date() == dt.date(2026, 11, 19)
+
+
 @pytest.mark.parametrize(
     ("phrase", "expected_intent"),
     [

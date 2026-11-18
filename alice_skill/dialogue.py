@@ -33,6 +33,7 @@ from alice_skill.models import (
     make_button,
 )
 from alice_skill.repository import SkillRepository
+from alice_skill.timeutil import SKILL_TIMEZONE, today_in_skill_timezone
 
 INTENT_LIST_TASKS = "list_tasks"
 INTENT_MY_POINTS = "my_points"
@@ -41,9 +42,6 @@ INTENT_LIST_REWARDS = "list_rewards"
 INTENT_TASK_DONE = "task_done"
 INTENT_WANT_REWARD = "want_reward"
 INTENT_ADD_PENALTY = "add_penalty"
-
-# Время навыка: по нему определяется «сегодня» для дневного плана.
-SKILL_TIMEZONE = dt.timezone(dt.timedelta(hours=3), name="MSK")
 
 MAX_LINES = 10
 # Сколько дополнительных задач перечислять: они не обязательны и не должны
@@ -115,7 +113,7 @@ def detect_intent(request: AliceRequest) -> str | None:
 
 
 def today_in_skill_timezone() -> dt.date:
-    """Сегодняшняя дата по времени навыка (МСК)."""
+    """Сегодняшняя дата по времени навыка (Екатеринбург, UTC+5)."""
     return dt.datetime.now(SKILL_TIMEZONE).date()
 
 

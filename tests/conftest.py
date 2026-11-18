@@ -48,7 +48,7 @@ def alice_event() -> Callable[..., dict[str, Any]]:
         return {
             "meta": {
                 "locale": "ru-RU",
-                "timezone": "Europe/Moscow",
+                "timezone": "Asia/Yekaterinburg",
                 "client_id": "ru.yandex.searchplugin/7.16",
             },
             "session": {
