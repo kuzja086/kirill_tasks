@@ -45,7 +45,7 @@ INTENT_ADD_PENALTY = "add_penalty"
 # Время навыка: по нему определяется «сегодня» для дневного плана.
 SKILL_TIMEZONE = dt.timezone(dt.timedelta(hours=3), name="MSK")
 
-MAX_LINES = 8
+MAX_LINES = 10
 # Сколько дополнительных задач перечислять: они не обязательны и не должны
 # вытеснять план дня из ответа.
 OPTIONAL_LINES = 3
