@@ -43,9 +43,11 @@ PENALTY_AWAITING = "awaiting_confirmation"
 PENALTY_APPLIED = "applied"
 PENALTY_REJECTED = "rejected"
 
-# Источник заявки на штраф.
+# Источник заявки на штраф: голос ребёнка, админка или автозаявка
+# за пропущенную задачу (списание всё равно ждёт подтверждения).
 SOURCE_ALICE = "alice"
 SOURCE_ADMIN = "admin"
+SOURCE_AUTO = "auto"
 
 # Результаты создания заявки на штраф.
 PENALTY_CREATED = "created"

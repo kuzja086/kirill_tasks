@@ -20,6 +20,7 @@ PENALTY_STATUS_LABELS = {
 SOURCE_LABELS = {
     "alice": "Алиса",
     "admin": "админка",
+    "auto": "пропуск",
 }
 
 KIND_LABELS = {

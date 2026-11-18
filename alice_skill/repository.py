@@ -82,39 +82,23 @@ UPSERT_GOAL = """
 """
 
 DELETE_GOAL = "DELETE FROM user_goals WHERE user_id = %s AND reward_id = %s"
-APPLY_MISSED_PENALTIES = """
-    WITH balance AS (
-        SELECT COALESCE(SUM(delta), 0) AS amount
-          FROM points_ledger
-         WHERE user_id = %s
-    ),
-    missed AS (
+# Пропущенные задачи не списывают баллы сами: в начале нового дня за каждую
+# создаётся заявка на штраф (source = 'auto'), а списание происходит только
+# после подтверждения взрослым — как и у штрафа, сказанного голосом.
+CREATE_MISSED_PENALTIES = """
+    WITH missed AS (
         UPDATE daily_assignments
            SET status = 'missed', resolved_at = now()
          WHERE user_id = %s
            AND plan_date < %s
            AND status = 'pending'
            AND kind <> 'optional'
-        RETURNING id, points, plan_date
-    ),
-    ordered AS (
-        SELECT id, points,
-               COALESCE(
-                   SUM(points) OVER (
-                       ORDER BY plan_date, id
-                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-                   ),
-                   0
-               ) AS already
-          FROM missed
+        RETURNING id, title, points
     )
-    INSERT INTO points_ledger (user_id, delta, reason, assignment_id)
-    SELECT %s,
-           -LEAST(points, GREATEST(amount - already, 0)),
-           'task_missed',
-           id
-      FROM ordered CROSS JOIN balance
-     WHERE LEAST(points, GREATEST(amount - already, 0)) > 0
+    INSERT INTO penalties (user_id, points, comment, source, assignment_id)
+    SELECT %s, points, 'Не выполнено: ' || title, 'auto', id
+      FROM missed
+    ON CONFLICT DO NOTHING
 """
 
 SELECT_PLAN = """
@@ -796,8 +780,9 @@ class PostgresSkillRepository:
         user_id: str,
         plan_date: dt.date,
     ) -> list[Assignment]:
-        # Штрафы за прошлые дни начисляются лениво, при первом обращении за день.
-        cursor.execute(APPLY_MISSED_PENALTIES, (user_id, user_id, plan_date, user_id))
+        # Заявки на штраф за пропущенные дни создаются лениво: при первом
+        # обращении за день. Баллы спишутся только после подтверждения.
+        cursor.execute(CREATE_MISSED_PENALTIES, (user_id, plan_date, user_id))
 
         assignments = self._select_plan(cursor, user_id, plan_date)
         if assignments:

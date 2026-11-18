@@ -157,6 +157,24 @@ def test_penalty_is_capped_by_available_points() -> None:
     assert "из 10" in page.text
 
 
+def test_missed_task_penalty_shows_auto_source_and_waits_for_confirmation() -> None:
+    repository = FakeSkillRepository(balance=10)
+    repository.add_penalty("user-1", 2, "Не выполнено: Зарядка", source="auto")
+    client = _client(repository)
+    _login(client)
+
+    page = client.get("/penalties")
+
+    assert "пропуск" in page.text
+    assert "Не выполнено: Зарядка" in page.text
+    assert repository.balance == 10, "до подтверждения баллы не списываются"
+
+    client.post("/penalties/1/apply", follow_redirects=False)
+
+    assert repository.balance == 8
+    assert repository.penalties[0].charged_points == 2
+
+
 def test_manual_penalty_creates_request() -> None:
     repository = FakeSkillRepository()
     client = _client(repository)

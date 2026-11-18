@@ -27,11 +27,11 @@ from alice_skill.models import (
     Task,
 )
 from alice_skill.repository import (
-    APPLY_MISSED_PENALTIES,
     CLAIM_ASSIGNMENT,
     CONFIRM_ASSIGNMENT,
     CONFIRM_PENALTY,
     COUNT_RECENT_PENALTIES,
+    CREATE_MISSED_PENALTIES,
     DELETE_GOAL,
     DuplicateTitleError,
     INSERT_ASSIGNMENT,
@@ -179,7 +179,7 @@ def test_set_goal_upserts_row() -> None:
 def test_ensure_daily_plan_creates_daily_and_random_tasks() -> None:
     database = FakeDatabase(
         {
-            APPLY_MISSED_PENALTIES: [[]],
+            CREATE_MISSED_PENALTIES: [[]],
             SELECT_PLAN: [[], [(11, "Зарядка", "daily", 10, "pending")]],
             SELECT_DAILY_TASKS: [[(1, "Зарядка", "daily", 10)]],
             SELECT_RANDOM_TASKS: [
@@ -199,19 +199,17 @@ def test_ensure_daily_plan_creates_daily_and_random_tasks() -> None:
     assert database.locks == ["user-1"]
 
 
-def test_ensure_daily_plan_applies_penalties_first() -> None:
+def test_ensure_daily_plan_creates_missed_penalty_requests_first() -> None:
     database = FakeDatabase(
         {
-            APPLY_MISSED_PENALTIES: [[]],
+            CREATE_MISSED_PENALTIES: [[]],
             SELECT_PLAN: [[(11, "Зарядка", "daily", 10, "missed")]],
         }
     )
 
     _repository(database).ensure_daily_plan("user-1", TODAY)
 
-    assert _executed(database, APPLY_MISSED_PENALTIES) == [
-        ("user-1", "user-1", TODAY, "user-1")
-    ]
+    assert _executed(database, CREATE_MISSED_PENALTIES) == [("user-1", TODAY, "user-1")]
     assert _executed(database, INSERT_ASSIGNMENT) == []
 
 
@@ -590,13 +588,20 @@ def test_optional_tasks_are_not_penalized_in_sql() -> None:
     # Дополнительные задачи не штрафуются и не попадают в план дня: условия
     # живут в самом SQL, чтобы их нельзя было обойти вызовом репозитория.
     assert "kind <> 'optional'" in REJECT_ASSIGNMENT
-    assert "kind <> 'optional'" in APPLY_MISSED_PENALTIES
+    assert "kind <> 'optional'" in CREATE_MISSED_PENALTIES
     assert "kind <> 'optional'" in SELECT_PLAN
+
+
+def test_missed_tasks_create_penalty_requests_without_deduction() -> None:
+    # Пропущенная задача сама баллы не списывает: создаётся заявка на штраф,
+    # а журнал пополняется только после подтверждения взрослым.
+    assert "INSERT INTO penalties" in CREATE_MISSED_PENALTIES
+    assert "'auto'" in CREATE_MISSED_PENALTIES
+    assert "points_ledger" not in CREATE_MISSED_PENALTIES
 
 
 def test_deductions_are_capped_by_balance_in_sql() -> None:
     # Баланс не может уйти в минус: каждое списание ограничено остатком.
-    assert "LEAST(points, GREATEST(amount - already, 0))" in APPLY_MISSED_PENALTIES
     assert "LEAST(r.points, GREATEST(COALESCE(b.amount, 0), 0))" in REJECT_ASSIGNMENT
     assert "charged_points = LEAST(" in CONFIRM_PENALTY
 
